@@ -7,39 +7,61 @@
     <view class="icon i-search"></view>
     <text class="muted">搜索游戏或服务</text>
   </view>
-  <view class="category-shell">
+  <view class="card pad state-card" wx:if="{{loading}}">
+    <view class="p muted">正在加载游戏与套餐…</view>
+  </view>
+  <view class="empty card" wx:elif="{{error}}">
+    <view>
+      <view class="h2">目录加载失败</view>
+      <view class="p">{{error}}</view>
+      <button class="btn btn-secondary state-button" bindtap="retry">重新加载</button>
+    </view>
+  </view>
+  <view class="category-shell" wx:else>
     <view class="category-menu card">
       <view
         wx:for="{{games}}"
-        wx:key="*this"
-        class="category-item {{item === activeGame ? 'active' : ''}}"
+        wx:key="id"
+        class="category-item {{item.id === activeGameId ? 'active' : ''}}"
         hover-class="row-hover"
-        data-game="{{item}}"
+        data-game-id="{{item.id}}"
         bindtap="switchGame"
-      >{{item}}</view>
+      >{{item.name}}</view>
     </view>
     <view class="category-list">
       <view
         wx:for="{{cards}}"
-        wx:key="code"
-        class="service-card card {{item.available ? '' : 'unavailable'}}"
-        hover-class="{{item.available ? 'card-press' : 'none'}}"
-        data-available="{{item.available}}"
+        wx:key="id"
+        class="service-card card {{item.purchasable ? '' : 'unavailable'}}"
+        hover-class="{{item.purchasable ? 'card-press' : 'none'}}"
         data-index="{{index}}"
-        aria-disabled="{{!item.available}}"
+        aria-disabled="{{!item.purchasable}}"
         bindtap="onCardTap"
       >
         <view class="cover"><text>{{item.code}}</text></view>
         <view class="service-copy">
-          <text class="tag">{{item.tag}}</text>
-          <view class="h3">{{item.title}}</view>
-          <view class="p">{{item.note}}</view>
+          <text class="tag">{{item.purchasable ? item.unitLabel + '计价' : '暂停接单'}}</text>
+          <view class="h3">{{item.name}}</view>
+          <view class="p">{{item.subtitle}}</view>
           <view class="row between">
-            <text class="old-price" wx:if="{{item.oldPrice}}">{{item.oldPrice}}</text>
-            <text class="price">{{item.price}}</text>
+            <text class="old-price">爆爆熊电竞</text>
+            <text class="price">{{item.priceText}}</text>
           </view>
         </view>
       </view>
+      <view class="empty card category-empty" wx:if="{{!loading && cards.length === 0}}">
+        <view>
+          <view class="h2">暂无开放套餐</view>
+          <view class="p">该游戏的服务套餐尚未开放，请查看其他游戏。</view>
+        </view>
+      </view>
+      <button
+        class="btn btn-secondary load-more"
+        wx:if="{{hasMore}}"
+        loading="{{loadingMore}}"
+        disabled="{{loadingMore}}"
+        bindtap="loadMore"
+      >{{loadingMore ? '加载中…' : '加载更多'}}</button>
     </view>
   </view>
 </view>

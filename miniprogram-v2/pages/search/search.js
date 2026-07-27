@@ -1,68 +1,100 @@
-// 搜索页：关键词实时过滤 4 张结果卡（逻辑移植自原型 shared/app.js 的 runSearch）
 const nav = require('../../utils/nav');
 const store = require('../../utils/store');
-
-const RESULTS = [
-  { code: 'FUN', tag: '娱乐陪', title: '娱乐陪', note: '10 元 / 局起', price: '¥10起', serviceCode: 'FUN' },
-  { code: 'PRO', tag: '技术陪', title: '技术陪', note: '15 元 / 局起', price: '¥15起', serviceCode: 'PRO' },
-  { code: 'DM', tag: '钻石', title: '钻石段位', note: '娱乐陪 25 · 技术陪 35', price: '¥25起', serviceCode: 'PRO' },
-  { code: 'SWEET', tag: '甜蜜单', title: '甜蜜单', note: '可以指定称呼', price: '¥52/h', serviceCode: 'SWEET' }
-];
-
-// 与原型 card.textContent.includes(term) 等价：按 DOM 顺序拼接卡片全部文案
-// （code + 标签 + 标题 + 说明 + 「爆爆熊电竞」 + 价格）
-const cardText = (r) => r.code + r.tag + r.title + r.note + '爆爆熊电竞' + r.price;
+const catalog = require('../../utils/catalog');
 
 Page({
   data: {
     keyword: '',
     inputFocus: false,
-    recentKeywords: ['钻石', '甜蜜单'],
-    hotKeywords: ['娱乐陪', '技术陪', '超凡'],
-    results: RESULTS.map((r) => Object.assign({ hidden: false }, r)),
-    count: RESULTS.length
+    recentKeywords: [],
+    hotKeywords: [],
+    results: [],
+    count: 0,
+    nextCursor: null,
+    hasMore: false,
+    loading: true,
+    loadingMore: false,
+    error: ''
   },
 
-  runSearch() {
-    const term = this.data.keyword.trim();
-    let count = 0;
-    const results = RESULTS.map((r) => {
-      const hit = !term || cardText(r).indexOf(term) !== -1;
-      if (hit) count++;
-      return Object.assign({ hidden: !hit }, r);
-    });
-    this.setData({ results, count });
+  async onLoad() {
+    await this.runSearch(true);
   },
 
-  onInput(e) {
+  async runSearch(reset) {
+    if (reset) {
+      this.searchRequestSeq = (this.searchRequestSeq || 0) + 1;
+      this.setData({ loading: true, error: '', nextCursor: null });
+    }
+    const requestSeq = this.searchRequestSeq || 0;
+    const payload = { keyword: this.data.keyword.trim(), limit: 10 };
+    if (!reset && this.data.nextCursor) payload.cursor = this.data.nextCursor;
+    try {
+      const data = await catalog.call('search', payload);
+      if (requestSeq !== this.searchRequestSeq) return;
+      const incoming = data.services.map((item) => Object.assign({}, item, {
+        priceText: catalog.formatPrice(item.priceCents, item.unitLabel)
+      }));
+      const results = reset
+        ? incoming
+        : catalog.mergeUnique(this.data.results, incoming);
+      this.setData({
+        results,
+        count: results.length,
+        nextCursor: data.nextCursor,
+        hasMore: Boolean(data.nextCursor),
+        error: ''
+      });
+    } catch (error) {
+      if (requestSeq !== this.searchRequestSeq) return;
+      this.setData({ error: error.message || '搜索失败，请稍后重试' });
+    } finally {
+      if (reset && requestSeq === this.searchRequestSeq) this.setData({ loading: false });
+    }
+  },
+
+  async onInput(e) {
     this.setData({ keyword: e.detail.value });
-    this.runSearch();
+    await this.runSearch(true);
   },
 
-  // 「清除」：清空输入并恢复全部结果（原型 data-clear-search）
-  onClear() {
+  async onClear() {
     this.setData({ keyword: '' });
-    this.runSearch();
+    await this.runSearch(true);
   },
 
-  // 最近 / 热门关键词 chip：填入并过滤，同时聚焦输入框（原型 data-keyword）
-  onKeyword(e) {
+  async onKeyword(e) {
     this.setData({ keyword: e.currentTarget.dataset.keyword, inputFocus: true });
-    this.runSearch();
+    await this.runSearch(true);
   },
 
   onInputBlur() {
     this.setData({ inputFocus: false });
   },
 
-  // 「清空」最近搜索：原型仅 toast，不移除 chip
   onClearRecent() {
-    nav.toast('已清空最近搜索');
+    this.setData({ recentKeywords: [] });
+  },
+
+  async loadMore() {
+    if (!this.data.hasMore || this.data.loadingMore) return;
+    this.setData({ loadingMore: true });
+    await this.runSearch(false);
+    this.setData({ loadingMore: false });
+  },
+
+  async retry() {
+    await this.runSearch(true);
   },
 
   openDetail(e) {
     const item = this.data.results[Number(e.currentTarget.dataset.index)];
-    store.setSelectedService({ code: item ? item.serviceCode : 'PRO', source: 'search' });
+    if (!item) return;
+    if (!item.purchasable) {
+      nav.toast(item.name + '当前暂停接单');
+      return;
+    }
+    store.setSelectedService({ id: item.id, code: item.code, source: 'search' });
     nav.go('service-detail');
   }
 });

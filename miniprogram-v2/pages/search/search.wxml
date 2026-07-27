@@ -11,7 +11,7 @@
     />
     <view class="top-text" hover-class="link-hover" bindtap="onClear">清除</view>
   </view>
-  <view>
+  <view wx:if="{{recentKeywords.length}}">
     <view class="section-head">
       <view class="h2">最近搜索</view>
       <view class="link" hover-class="link-hover" bindtap="onClearRecent">清空</view>
@@ -27,7 +27,7 @@
       >{{item}}</view>
     </view>
   </view>
-  <view>
+  <view wx:if="{{hotKeywords.length}}">
     <view class="section-head">
       <view class="h2">热门关键词</view>
     </view>
@@ -45,36 +45,52 @@
   <view>
     <view class="section-head">
       <view class="h2">搜索结果</view>
-      <text class="meta muted">{{count}} 项</text>
+      <text class="meta muted">已加载 {{count}} 项</text>
     </view>
-    <view>
+    <view class="card pad state-card" wx:if="{{loading}}">
+      <view class="p muted">正在搜索云端套餐…</view>
+    </view>
+    <view class="empty card" wx:elif="{{error}}">
+      <view>
+        <view class="h2">搜索失败</view>
+        <view class="p">{{error}}</view>
+        <button class="btn btn-secondary state-button" bindtap="retry">重新搜索</button>
+      </view>
+    </view>
+    <view wx:else>
       <view
         wx:for="{{results}}"
-        wx:key="code"
-        hidden="{{item.hidden}}"
-        class="service-card card"
-        hover-class="card-press"
+        wx:key="id"
+        class="service-card card {{item.purchasable ? '' : 'unavailable'}}"
+        hover-class="{{item.purchasable ? 'card-press' : 'none'}}"
         data-index="{{index}}"
         bindtap="openDetail"
       >
         <view class="cover"><text>{{item.code}}</text></view>
         <view class="service-copy">
-          <text class="tag">{{item.tag}}</text>
-          <view class="h3">{{item.title}}</view>
-          <view class="p">{{item.note}}</view>
+          <text class="tag">{{item.purchasable ? item.unitLabel + '计价' : '暂停接单'}}</text>
+          <view class="h3">{{item.name}}</view>
+          <view class="p">{{item.subtitle}}</view>
           <view class="row between">
             <text class="old-price">爆爆熊电竞</text>
-            <text class="price">{{item.price}}</text>
+            <text class="price">{{item.priceText}}</text>
           </view>
         </view>
       </view>
-    </view>
-    <view class="empty card" hidden="{{count !== 0}}">
-      <view>
-        <view class="empty-mark"><view class="icon i-search"></view></view>
-        <view class="h2">没有找到匹配服务</view>
-        <view class="p">换个段位或服务类型试试。</view>
+      <view class="empty card" wx:if="{{count === 0}}">
+        <view>
+          <view class="empty-mark"><view class="icon i-search"></view></view>
+          <view class="h2">没有找到匹配服务</view>
+          <view class="p">换个游戏、段位或服务类型试试。</view>
+        </view>
       </view>
+      <button
+        class="btn btn-secondary load-more"
+        wx:if="{{hasMore}}"
+        loading="{{loadingMore}}"
+        disabled="{{loadingMore}}"
+        bindtap="loadMore"
+      >{{loadingMore ? '加载中…' : '加载更多'}}</button>
     </view>
   </view>
 </view>

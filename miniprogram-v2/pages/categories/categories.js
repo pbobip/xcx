@@ -1,50 +1,22 @@
-// 游戏分类页：左侧 6 游戏菜单切换右侧价目列表（数据展开自原型 shared/app.js 的 gameCatalog）
 const nav = require('../../utils/nav');
 const store = require('../../utils/store');
-
-const GAMES = ['英雄联盟', '永劫无间', '三角洲行动', '王者荣耀', '绝地求生', '无畏契约'];
-
-// 原型 serviceCard(code, title, tier, note, price)：可点击进入服务详情
-const serviceCard = (code, title, tier, note, price) => ({
-  code,
-  tag: tier,
-  title,
-  note,
-  oldPrice: '爆爆熊电竞',
-  price,
-  available: true
-});
-
-// 原型 unavailableGameCard(code, game)：待运营配置，不可点击
-const unavailableGameCard = (code, game) => ({
-  code,
-  tag: game,
-  title: '陪玩与护航',
-  note: '套餐价格与规则配置中',
-  oldPrice: '',
-  price: '敬请期待',
-  available: false
-});
-
-const GAME_CATALOG = {
-  '英雄联盟': [unavailableGameCard('LOL', '英雄联盟')],
-  '永劫无间': [unavailableGameCard('NAR', '永劫无间')],
-  '三角洲行动': [unavailableGameCard('DF', '三角洲行动')],
-  '王者荣耀': [unavailableGameCard('HOK', '王者荣耀')],
-  '绝地求生': [unavailableGameCard('PUBG', '绝地求生')],
-  '无畏契约': [
-    serviceCard('BASIC', '匹配 / 下三 / 黄金', '基础档', '10 元一局或 20 元 / 小时', '¥10/局'),
-    serviceCard('FUN', '娱乐陪', '娱乐陪', '基础 10 · 铂金 15 · 钻石 25 · 超凡 35', '¥10起'),
-    serviceCard('PRO', '技术陪', '技术陪', '基础 15 · 铂金 25 · 钻石 35 · 超凡 45', '¥15起'),
-    serviceCard('SWEET', '甜蜜单', '甜蜜单', '可以指定称呼', '¥52/h')
-  ]
-};
+const catalog = require('../../utils/catalog');
 
 Page({
   data: {
-    games: GAMES,
-    activeGame: GAMES[0],
-    cards: GAME_CATALOG[GAMES[0]]
+    games: [],
+    categories: [],
+    activeGameId: '',
+    cards: [],
+    nextCursor: null,
+    loading: true,
+    loadingMore: false,
+    hasMore: false,
+    error: ''
+  },
+
+  async onLoad() {
+    await this.loadInitial();
   },
 
   onShow() {
@@ -55,20 +27,88 @@ Page({
     nav.go('search');
   },
 
-  switchGame(e) {
-    const game = e.currentTarget.dataset.game;
-    if (!GAME_CATALOG[game]) return;
-    this.setData({ activeGame: game, cards: GAME_CATALOG[game] });
-    nav.toast('已切换至' + game);
+  async loadInitial() {
+    this.setData({ loading: true, error: '' });
+    try {
+      const [gameData, categoryData] = await Promise.all([
+        catalog.call('game.list'),
+        catalog.call('category.list', { kind: 'GAME' })
+      ]);
+      const categoryGameIds = new Set(categoryData.categories.map((item) => item.gameId));
+      const games = gameData.games.filter((item) => categoryGameIds.has(item.id));
+      const activeGameId = games[0] ? games[0].id : '';
+      this.setData({
+        games,
+        categories: categoryData.categories,
+        activeGameId,
+        cards: [],
+        nextCursor: null,
+        hasMore: false
+      });
+      if (activeGameId) await this.loadServices(true);
+    } catch (error) {
+      this.setData({ error: error.message || '目录加载失败，请稍后重试' });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
+
+  async loadServices(reset) {
+    const gameId = this.data.activeGameId;
+    const payload = { gameId, limit: 10 };
+    if (!reset && this.data.nextCursor) payload.cursor = this.data.nextCursor;
+    const data = await catalog.call('service.list', payload);
+    if (gameId !== this.data.activeGameId) return;
+    const incoming = data.services.map((item) => Object.assign({}, item, {
+      priceText: catalog.formatPrice(item.priceCents, item.unitLabel)
+    }));
+    const cards = reset
+      ? incoming
+      : catalog.mergeUnique(this.data.cards, incoming);
+    this.setData({
+      cards,
+      nextCursor: data.nextCursor,
+      hasMore: Boolean(data.nextCursor),
+      error: ''
+    });
+  },
+
+  async loadMore() {
+    if (!this.data.hasMore || this.data.loadingMore) return;
+    this.setData({ loadingMore: true });
+    try {
+      await this.loadServices(false);
+    } catch (error) {
+      this.setData({ error: error.message || '加载更多失败，请稍后重试' });
+    } finally {
+      this.setData({ loadingMore: false });
+    }
+  },
+
+  async retry() {
+    await this.loadInitial();
+  },
+
+  async switchGame(e) {
+    const gameId = e.currentTarget.dataset.gameId;
+    if (!gameId || gameId === this.data.activeGameId) return;
+    this.setData({ activeGameId: gameId, cards: [], nextCursor: null, hasMore: false, loading: true, error: '' });
+    try {
+      await this.loadServices(true);
+    } catch (error) {
+      this.setData({ error: error.message || '套餐加载失败，请稍后重试' });
+    } finally {
+      this.setData({ loading: false });
+    }
   },
 
   onCardTap(e) {
     const card = this.data.cards[Number(e.currentTarget.dataset.index)];
-    if (!e.currentTarget.dataset.available) {
-      if (card) nav.toast(card.title + '暂未开放');
+    if (!card || !card.purchasable) {
+      if (card) nav.toast(card.name + '当前暂停接单');
       return;
     }
-    store.setSelectedService({ code: card ? card.code : 'PRO', source: 'categories' });
+    store.setSelectedService({ id: card.id, code: card.code, source: 'categories' });
     nav.go('service-detail');
   }
 });

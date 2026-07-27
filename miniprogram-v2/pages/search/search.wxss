@@ -1,3 +1,7 @@
 /* 搜索页特有样式：仅触摸反馈（其余类均由 app.wxss 全局提供） */
 .link-hover { opacity: 0.6; }
 .chip-hover { transform: translate(2rpx, 2rpx); }
+.state-card { text-align: center; }
+.state-button { margin-top: 24rpx; }
+.load-more { width: 100%; margin-top: 20rpx; }
+.unavailable { opacity: 0.72; }

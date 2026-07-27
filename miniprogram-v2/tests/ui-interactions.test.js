@@ -80,7 +80,33 @@ function loadPage(relativePath, seed = {}, options = {}) {
 }
 
 test('游客选择套餐时先进入登录，云端登录后回到确认订单', async () => {
-  const detail = loadPage('pages/service-detail/service-detail.js');
+  const detail = loadPage('pages/service-detail/service-detail.js', {}, {
+    cloudResponse: {
+      result: {
+        success: true,
+        data: {
+          service: {
+            id: 'service-val-pro',
+            code: 'VAL_PRO',
+            name: '钻石段位技术陪',
+            subtitle: '技术提升',
+            priceCents: 3500,
+            originalPriceCents: null,
+            unitLabel: '局',
+            purchasable: true,
+            platforms: ['PC'],
+            regions: [],
+            descriptionBlocks: [],
+            fulfillmentStandard: '按订单约定完成服务',
+            purchaseNotice: '仅限成年人下单',
+            stats: { orderCount: 0, reviewCount: 0, overallScore: null }
+          }
+        }
+      }
+    }
+  });
+
+  await detail.page.onLoad({ serviceId: 'service-val-pro' });
 
   detail.page.onChoosePlan();
 
@@ -125,7 +151,7 @@ test('游客直接打开确认订单页也不能绕过登录校验', () => {
   });
 });
 
-test('云端登录顾客选择套餐后可以继续打开确认订单', () => {
+test('云端登录顾客选择套餐后可以继续打开确认订单', async () => {
   const seed = {
     bbx_current_user: {
       id: 'users-test',
@@ -134,19 +160,43 @@ test('云端登录顾客选择套餐后可以继续打开确认订单', () => {
       avatarFileId: null
     }
   };
-  const detail = loadPage('pages/service-detail/service-detail.js', seed);
+  const service = {
+    id: 'service-val-pro',
+    code: 'VAL_PRO',
+    name: '钻石段位技术陪',
+    subtitle: '技术提升',
+    priceCents: 3500,
+    originalPriceCents: null,
+    minQuantity: 1,
+    maxQuantity: 99,
+    unitLabel: '局',
+    purchasable: true,
+    platforms: ['PC'],
+    regions: [{ code: 'CN', name: '国服', status: 'ACTIVE' }],
+    descriptionBlocks: [],
+    fulfillmentStandard: '按订单约定完成服务',
+    purchaseNotice: '仅限成年人下单',
+    stats: { orderCount: 0, reviewCount: 0, overallScore: null }
+  };
+  const cloudResponse = { result: { success: true, data: { service } } };
+  const detail = loadPage('pages/service-detail/service-detail.js', seed, { cloudResponse });
+
+  await detail.page.onLoad({ serviceId: service.id });
 
   detail.page.onChoosePlan();
 
   assert.equal(detail.calls.at(-1).url, '/pages/checkout/checkout');
 
-  const checkout = loadPage('pages/checkout/checkout.js', seed);
-  checkout.page.onLoad();
+  const checkout = loadPage('pages/checkout/checkout.js', Object.assign({}, seed, {
+    bbx_selected_service: detail.storage.get('bbx_selected_service')
+  }), { cloudResponse });
+  await checkout.page.onLoad();
 
   assert.equal(
     checkout.calls.some((call) => call.url === '/pages/login/login'),
     false
   );
+  assert.equal(checkout.page.data.catalogBlocked, false);
 });
 
 test('访客打开消息页时先登录，登录后返回消息页', async () => {
@@ -278,13 +328,40 @@ test('点击订单后，详情页读取对应订单而不是固定演示订单',
   assert.equal(detail.page.data.progressIndex, 2);
 });
 
-test('首页推荐卡打开与卡片文案一致的技术陪套餐', () => {
-  const home = loadPage('pages/home/home.js');
+test('首页云端推荐卡打开与卡片文案一致的技术陪套餐', async () => {
+  const service = {
+    id: 'service-val-pro',
+    code: 'VAL_PRO',
+    name: '钻石段位技术陪',
+    subtitle: '技术提升',
+    priceCents: 3500,
+    unitLabel: '局',
+    purchasable: true
+  };
+  const home = loadPage('pages/home/home.js', {}, {
+    cloudResponse: {
+      result: {
+        success: true,
+        data: {
+          banners: [],
+          latestServices: [service],
+          recommendations: [
+            { id: 'recommend-main', code: 'HOME_RECOMMENDED', name: '推荐', services: [service] }
+          ],
+          services: [service],
+          nextCursor: null
+        }
+      }
+    }
+  });
+
+  await home.page.onLoad();
 
   home.page.onFeedTap({ currentTarget: { dataset: { index: 0 } } });
 
   assert.deepEqual(home.storage.get('bbx_selected_service'), {
-    code: 'PRO',
+    id: 'service-val-pro',
+    code: 'VAL_PRO',
     source: 'home-feed'
   });
   assert.equal(home.calls.at(-1).url, '/pages/service-detail/service-detail');

@@ -86,3 +86,6 @@
 /* 触摸反馈（本页专属 hover-class） */
 .reference-tab-hover { opacity: 0.72; }
 .link-hover { opacity: 0.72; }
+.state-card { text-align: center; }
+.state-button { margin-top: 24rpx; }
+.unavailable { opacity: 0.72; }

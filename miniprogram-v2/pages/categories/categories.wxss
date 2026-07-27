@@ -27,3 +27,7 @@
 .category-list .row.between { gap: 8rpx; }
 .category-list .price { margin-left: auto; font-size: 22rpx; }
 .unavailable { opacity: 0.72; }
+.state-card { text-align: center; }
+.state-button { margin-top: 24rpx; }
+.category-empty { min-height: 300rpx; }
+.load-more { width: 100%; margin-top: 8rpx; }

@@ -1,1 +1,6 @@
-/* service-detail 页面：布局与卡片样式均由 app.wxss 全局提供（hero-cover / detail-block / metric / sticky-action 等），无页面特有样式 */
+.state-card { text-align: center; }
+.state-button { margin-top: 24rpx; }
+.detail-title { font-size: 42rpx; margin: 20rpx 0 12rpx; }
+.detail-price-row { margin-top: 28rpx; }
+.stats-note { font-size: 22rpx; margin-top: 20rpx; }
+.disabled { opacity: 0.55; }

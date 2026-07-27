@@ -1,30 +1,78 @@
 const nav = require('../../utils/nav');
 const store = require('../../utils/store');
+const catalog = require('../../utils/catalog');
+
+function decorateService(service, group, groupLabel) {
+  return Object.assign({}, service, {
+    group,
+    groupLabel,
+    priceText: catalog.formatPrice(service.priceCents, service.unitLabel)
+  });
+}
 
 Page({
   data: {
-    // 推荐区 tabs：key 用于筛选（'全部' 显示为「推荐」）
-    tabs: [
-      { key: '全部', label: '推荐' },
-      { key: '陪玩专区', label: '陪玩专区' },
-      { key: '护航专区', label: '护航专区' },
-      { key: '教学专区', label: '教学专区' },
-      { key: '热门活动', label: '热门活动' }
-    ],
-    activeFilter: '全部',
-    feed: [
-      { code: 'VAL', serviceCode: 'PRO', title: '无畏契约技术陪｜按局', group: '陪玩专区', note: '钻石技术陪，白金或人前五', price: '¥35/局', available: true },
-      { code: 'LOL', title: '英雄联盟双排陪玩｜按小时', group: '陪玩专区', note: '服务时长与区服待运营配置', price: '待配置', available: false },
-      { code: 'DF', title: '三角洲行动护航｜指定任务', group: '护航专区', note: '任务范围以下单说明为准', price: '待配置', available: false },
-      { code: 'HOK', title: '王者荣耀娱乐陪｜按局', group: '陪玩专区', note: '手机端套餐待运营配置', price: '待配置', available: false },
-      { code: 'PUBG', title: '绝地求生战术教学｜1小时', group: '教学专区', note: '课程内容待运营配置', price: '待配置', available: false },
-      { code: 'NAR', title: '永劫无间护航｜指定任务', group: '护航专区', note: '套餐内容待运营配置', price: '待配置', available: false },
-      { code: 'NEW', title: '新人体验活动', group: '热门活动', note: '活动规则与时间待运营配置', price: '待配置', available: false }
-    ]
+    banner: null,
+    hotService: null,
+    tabs: [{ key: 'ALL', label: '推荐' }],
+    activeFilter: 'ALL',
+    feed: [],
+    loading: true,
+    error: ''
+  },
+
+  async onLoad() {
+    await this.loadHome();
   },
 
   onShow() {
     getApp().syncMessageBadge();
+  },
+
+  async loadHome() {
+    this.setData({ loading: true, error: '' });
+    try {
+      const data = await catalog.call('home', { limit: 10 });
+      const recommendations = data.recommendations.filter(
+        (item) => item.code !== 'HOME_LATEST' && item.services.length
+      );
+      const tabs = [{ key: 'ALL', label: '推荐' }].concat(
+        recommendations.map((item) => ({ key: item.code, label: item.name }))
+      );
+      const feed = [];
+      const ids = new Set();
+      for (const recommendation of recommendations) {
+        for (const service of recommendation.services) {
+          if (ids.has(service.id)) continue;
+          ids.add(service.id);
+          feed.push(decorateService(service, recommendation.code, recommendation.name));
+        }
+      }
+      if (!feed.length) {
+        for (const service of data.services) {
+          if (ids.has(service.id)) continue;
+          ids.add(service.id);
+          feed.push(decorateService(service, 'ALL', '推荐'));
+        }
+      }
+      const hot = data.latestServices[0] || data.services[0] || null;
+      this.setData({
+        banner: data.banners[0] || null,
+        hotService: hot ? decorateService(hot, 'LATEST', '最新服务') : null,
+        tabs,
+        activeFilter: 'ALL',
+        feed,
+        error: ''
+      });
+    } catch (error) {
+      this.setData({ error: error.message || '首页内容加载失败，请稍后重试' });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
+
+  async retry() {
+    await this.loadHome();
   },
 
   onSearch() {
@@ -36,7 +84,13 @@ Page({
   },
 
   goDetail() {
-    store.setSelectedService({ code: 'BASIC', source: 'home-hot' });
+    const item = this.data.hotService;
+    if (!item) return;
+    if (!item.purchasable) {
+      nav.toast(item.name + '当前暂停接单');
+      return;
+    }
+    store.setSelectedService({ id: item.id, code: item.code, source: 'home-hot' });
     nav.go('service-detail');
   },
 
@@ -47,13 +101,13 @@ Page({
   },
 
   onFeedTap(e) {
-    const item = this.data.feed[e.currentTarget.dataset.index];
+    const item = this.data.feed[Number(e.currentTarget.dataset.index)];
     if (!item) return;
-    if (item.available) {
-      store.setSelectedService({ code: item.serviceCode || item.code, source: 'home-feed' });
-      nav.go('service-detail');
-    } else {
-      nav.toast(item.title + '待运营配置');
+    if (!item.purchasable) {
+      nav.toast(item.name + '当前暂停接单');
+      return;
     }
+    store.setSelectedService({ id: item.id, code: item.code, source: 'home-feed' });
+    nav.go('service-detail');
   }
 });
