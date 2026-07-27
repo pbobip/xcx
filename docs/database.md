@@ -37,7 +37,7 @@
 - `OFFLINE`：已下架，顾客不可见；
 - `HIDDEN`：功能或入口隐藏。
 
-### 2.2 服务订单状态
+### 2.2 服务订单的三维状态
 
 **支付状态 `paymentStatus`**：
 
@@ -49,6 +49,7 @@
 
 **履约状态 `fulfillmentStatus`**：
 
+- `NOT_STARTED`：未进入履约，通常表示订单仍待付款；
 - `PENDING_ASSIGNMENT`：待人工派单；
 - `WAITING_START`：已派单，待开始；
 - `IN_SERVICE`：服务中；
@@ -68,7 +69,7 @@
 
 | 顾客标签 | 状态条件 |
 |---|---|
-| 待付款 | `paymentStatus = UNPAID` |
+| 待付款 | `paymentStatus = UNPAID` 且履约为 `NOT_STARTED` |
 | 待服务 | `paymentStatus = PAID` 且履约为 `PENDING_ASSIGNMENT` 或 `WAITING_START` |
 | 进行中 | 履约为 `IN_SERVICE` 或 `WAITING_CONFIRMATION` |
 | 已完成 | `fulfillmentStatus = COMPLETED` |
@@ -99,6 +100,7 @@
 | `avatarFileId` | string/null | 头像云文件 ID |
 | `status` | string | `ACTIVE`、`DISABLED`、`CANCELLED` |
 | `preferences.orderNotifications` | boolean | 站内订单通知偏好 |
+| `preferences.recentSearches` | string[] | 最近搜索，最多保留 10 个去重关键词 |
 | `agreementConsents` | array | 已同意的协议类型、版本和时间 |
 | `lastLoginAt` | date | 最近登录时间 |
 | `cancelledAt` | date/null | 注销时间 |
@@ -201,7 +203,7 @@
 |---|---|---|
 | `orderNo` | string | 平台订单号，唯一 |
 | `userId` | string | 顾客 ID |
-| `serviceId` | string | 当前套餐引用，仅用于追踪 |
+| `serviceId` | string | 服务套餐来源引用，仅用于追踪 |
 | `snapshot` | object | 套餐、价格、字段、标准、须知和协议的不可变快照 |
 | `quantity` | number | 购买数量 |
 | `unitPriceCents` | number | 下单单价 |
@@ -226,7 +228,7 @@
 
 ### 6.3 `order_logs`
 
-字段：`orderId`、`orderNo`、`action`、`fromState`、`toState`、`actorType`、`actorId`、`customerVisible`、`customerMessage`、`internalReason`、`requestId`。
+字段：`orderId`、`orderNo`、`action`、`statusDimension`（`PAYMENT`/`FULFILLMENT`/`AFTER_SALES`）、`fromStatus`、`toStatus`、`actorType`、`actorId`、`customerVisible`、`customerMessage`、`internalReason`、`requestId`。一个动作同时改变多个维度时，按维度写多条共享同一 `requestId` 的日志。
 
 索引：`orderId + createdAt`；`actorId + createdAt`；`requestId`。
 

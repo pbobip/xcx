@@ -159,7 +159,7 @@
 
 | 场景 | 支付状态 | 履约状态 | 售后状态 | 用途 |
 |---|---|---|---|---|
-| 未付款 | `UNPAID` | `PENDING_ASSIGNMENT` | `NONE` | 继续支付、取消、关单 |
+| 未付款 | `UNPAID` | `NOT_STARTED` | `NONE` | 继续支付、取消、关单 |
 | 已付款待派单 | `PAID` | `PENDING_ASSIGNMENT` | `NONE` | 派单队列 |
 | 已派单待开始 | `PAID` | `WAITING_START` | `NONE` | 改派与开始 |
 | 服务中 | `PAID` | `IN_SERVICE` | `NONE` | 进度与投诉 |

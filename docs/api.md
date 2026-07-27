@@ -4,7 +4,7 @@
 
 小程序和 Web 运营后台都通过少量按业务域组织的深模块访问云端。调用方只需要知道模块名、动作、输入、输出和错误模式；数据库结构、状态机、事务、权限和微信支付细节隐藏在实现内部。
 
-外部接口模块：`auth`、`catalog`、`order`、`payment`、`service`、`customer`、`admin`。
+外部接口模块：`auth`、`catalog`、`order`、`payment`、`fulfillment`、`customer`、`admin`。PRD 草案中的派单模块名 `service` 在此确定为 `fulfillment`，避免与服务套餐动作 `catalog.service.*` 混淆。
 
 ## 2. 通用调用约定
 
@@ -35,8 +35,8 @@
 {
   "success": false,
   "error": {
-    "code": "ORDER_STATE_CONFLICT",
-    "message": "订单状态已变化，请刷新后重试",
+    "code": "FULFILLMENT_STATUS_CONFLICT",
+    "message": "履约状态已变化，请刷新后重试",
     "details": {}
   },
   "requestId": "追踪号"
@@ -87,7 +87,7 @@
 | `quote` | 顾客 | 套餐 ID、数量、动态字段、优惠券 ID | 报价 ID、原价、优惠、应付、过期时间、字段校验结果 | 只读，不需要 |
 | `create` | 顾客 | 报价 ID、字段值、预约、备注、协议版本 | 服务订单、付款状态 | `idempotencyKey` 必填 |
 
-`quote` 必须重新读取套餐与优惠券，不使用前端单价。`create` 校验报价未过期且内容未变化，过滤敏感备注，保存不可变订单快照并锁定优惠券。
+`quote` 必须重新读取套餐与优惠券，不使用前端单价。`create` 校验报价未过期且内容未变化，过滤敏感备注，保存不可变订单快照并锁定优惠券；新订单初始为支付 `UNPAID`、履约 `NOT_STARTED`、售后 `NONE`。
 
 ### 5.2 顾客订单
 
@@ -121,17 +121,17 @@
 | `refund.request` | 客服/管理员 | 订单 ID、金额、原因 | 退款申请记录 | `idempotencyKey` 必填 |
 | `refund.query` | 财务/系统 | 退款记录 ID | 退款结果 | 只读或同步一次状态 |
 
-微信支付通知和退款通知是独立 HTTP 接口，不由小程序调用。处理步骤固定为：验签 → 解密 → 校验商户号/订单号/金额 → 按通知 ID 幂等 → 事务更新支付记录、服务订单、优惠券和系统消息 → 返回微信要求的确认结果。
+微信支付通知和退款通知是独立 HTTP 接口，不由小程序调用。处理步骤固定为：验签 → 解密 → 校验商户号/订单号/金额 → 按通知 ID 幂等 → 事务更新支付记录、服务订单、优惠券和系统消息 → 返回微信要求的确认结果。首次确认支付成功时，支付状态变为 `PAID`，履约状态从 `NOT_STARTED` 进入 `PENDING_ASSIGNMENT`。
 
 客户端点击“支付完成”不能直接修改 `paymentStatus`。
 
-## 8. 派单与履约模块 `service`
+## 8. 派单与履约模块 `fulfillment`
 
 | 动作 | 权限 | 输入 | 输出 |
 |---|---|---|---|
 | `staff.listAvailable` | 派单员 | 游戏、平台、时间 | 可用内部服务人员（内部字段） |
-| `assign` | 派单员 | 订单 ID、人员 ID、线下确认标记、版本 | 派单记录和新订单状态 |
-| `reassign` | 派单员 | 订单 ID、新人员 ID、原因、版本 | 新派单记录和订单状态 |
+| `assign` | 派单员 | 订单 ID、人员 ID、线下确认标记、版本 | 派单记录和新履约状态 |
+| `reassign` | 派单员 | 订单 ID、新人员 ID、原因、版本 | 新派单记录和当前履约状态 |
 | `start` | 派单员/运营 | 订单 ID、版本 | 服务中订单 |
 | `submitCompletion` | 派单员/运营 | 订单 ID、公开完成摘要、版本 | 待确认订单 |
 | `forceComplete` | 高权限管理员 | 订单 ID、依据、版本 | 完成订单与审计记录 |
@@ -140,7 +140,17 @@
 
 ## 9. 顾客互动模块 `customer`
 
-### 9.1 系统消息
+### 9.1 搜索记录
+
+| 动作 | 输入 | 输出 |
+|---|---|---|
+| `searchHistory.list` | 无 | 当前顾客最近搜索；访客返回空数组 |
+| `searchHistory.record` | 规范化关键词 | 去重且最多 10 个的最近搜索 |
+| `searchHistory.clear` | 无 | 空数组 |
+
+热门关键词不是顾客数据，由 `catalog.home` 或 `catalog.search` 从运营配置返回。
+
+### 9.2 系统消息
 
 | 动作 | 输入 | 输出 |
 |---|---|---|
@@ -149,7 +159,7 @@
 | `message.read` | 消息 ID | 更新后的消息 |
 | `message.readAll` | 无 | 未读数 0 |
 
-### 9.2 评价
+### 9.3 评价
 
 | 动作 | 输入 | 输出 |
 |---|---|---|
@@ -159,7 +169,7 @@
 
 只有本人已完成且未评价的订单可以调用 `review.create`。评分聚合由云端更新，后台没有修改星级接口。
 
-### 9.3 投诉、反馈与隐私
+### 9.4 投诉、反馈与隐私
 
 | 动作 | 输入 | 输出 |
 |---|---|---|
@@ -205,7 +215,7 @@
 |---|---|
 | `order.list/detail` | 筛选待付款、待派单、预约临近、进行中和售后订单 |
 | `staff.*` | 维护人员、擅长游戏、平台、可用状态和内部备注 |
-| `dispatch.*` | 调用 `service` 模块的派单与改派能力 |
+| `dispatch.*` | 调用 `fulfillment` 模块的派单与改派能力 |
 | `refund.*` | 发起、审批、查询退款；金额权限按角色控制 |
 | `coupon.*` | 维护模板、发放、作废未使用券 |
 | `review.*` | 审核违规内容；不能修改星级和订单关联 |
@@ -228,7 +238,9 @@
 | `SENSITIVE_CONTENT` | 输入包含禁止的敏感信息 |
 | `COUPON_NOT_APPLICABLE` | 优惠券不适用 |
 | `COUPON_ALREADY_USED` | 优惠券已核销或被其他订单锁定 |
-| `ORDER_STATE_CONFLICT` | 当前状态不允许操作 |
+| `PAYMENT_STATUS_CONFLICT` | 当前支付状态不允许操作 |
+| `FULFILLMENT_STATUS_CONFLICT` | 当前履约状态不允许操作 |
+| `AFTER_SALES_STATUS_CONFLICT` | 当前售后状态不允许操作 |
 | `PAYMENT_PENDING` | 支付结果尚未确认 |
 | `PAYMENT_AMOUNT_MISMATCH` | 支付通知金额不一致 |
 | `DUPLICATE_REQUEST` | 幂等键已处理且请求内容不同 |
@@ -240,7 +252,7 @@
 - `order.create`：`userId + idempotencyKey` 唯一；相同请求返回原订单，不同内容返回冲突；
 - 支付通知：按微信通知 ID 和交易号去重；
 - 退款：按平台退款号和幂等键去重，累计退款不得超过实付；
-- 优惠券：锁定、核销、退回与订单状态在事务中一致更新；
+- 优惠券：锁定、核销、退回与支付状态、履约状态在事务中一致更新；
 - 派单和状态变化：校验订单 `version`，成功后加一；
 - 消息：业务事件带唯一事件键，避免重复生成同类通知；
 - 评价：`orderId` 唯一；
@@ -254,7 +266,7 @@
 2. `catalog.home/service.list/service.detail`：上下架、分页和配置变化；
 3. `order.quote/create/detail`：服务端计价、快照、敏感输入和幂等；
 4. `payment` 通知接口：验签后的金额校验、重复和乱序；
-5. `service.assign/start/submitCompletion`：付款前不可派单和状态机；
+5. `fulfillment.assign/start/submitCompletion`：付款前不可派单和履约状态机；
 6. `customer.review.create/complaint.create`：订单归属、资格和暂停自动完成；
 7. `admin`：角色权限、敏感字段和审计结果。
 

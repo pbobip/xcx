@@ -50,7 +50,7 @@
 | 我的优惠券 `coupons` | 只有三个标签和统一空状态 | 顾客券、模板、状态、面额、门槛、范围、有效期 | `user_coupons`、`coupon_templates` | `coupon.mine.list` | 真实无券时保留空状态；禁止跨用户读取 |
 | 我的投诉 `complaints` | 投诉卡文案写死，点击只提示待接后台 | 投诉编号、关联订单、原因、状态、提交时间、客服回复和处理进度 | `complaints` | `customer.complaint.list/detail` | 只显示本人投诉；处理中暂停自动完成 |
 | 提交投诉 `complaint-submit` | 订单号与原因列表写死；图片只保留临时路径 | 可投诉订单、原因、说明、图片文件 ID、提交状态 | `orders`、`complaints`、云存储 | `customer.complaint.eligibleOrders/create` | 图片先上传私有路径；服务端校验订单归属和输入 |
-| 设置 `settings` | 通知开关存本地；反馈、协议、隐私和注销都是提示 | 通知偏好、协议/隐私版本、反馈、注销与删除请求、品牌与客服公开信息 | `users`、`agreements`、`feedback`、`privacy_requests`、`system_settings` | `customer.settings.get/update`、`customer.agreement.get`、`customer.feedback.create`、`customer.privacyRequest.create` | 退出仅清本地会话；依法保存的订单不删除 |
+| 设置 `settings` | 通知开关存本地；反馈、协议、隐私和注销都是提示 | 通知偏好、协议/隐私版本、反馈、注销与删除请求、品牌与客服公开信息 | `users`、`agreements`、`feedback`、`privacy_requests`、`system_settings` | `auth.profile`、`auth.preferences.update`、`customer.agreement.get`、`customer.feedback.create`、`customer.privacyRequest.create` | 退出仅清本地会话；依法保存的订单不删除 |
 
 ### 4.2 P1 页面
 
