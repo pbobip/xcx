@@ -40,18 +40,23 @@ Page({
       ? e.currentTarget.dataset.status
       : '';
     store.setPendingTabState(status || '全部');
+    if (!auth.requireLogin('orders')) return;
     nav.go('orders');
   },
   goCoupons() {
+    if (!auth.requireLogin('coupons')) return;
     nav.go('coupons');
   },
   goComplaints() {
+    if (!auth.requireLogin('complaints')) return;
     nav.go('complaints');
   },
   goBalance() {
+    if (!auth.requireLogin('balance')) return;
     nav.go('balance');
   },
   goInvite() {
+    if (!auth.requireLogin('invite')) return;
     nav.go('invite');
   }
 });

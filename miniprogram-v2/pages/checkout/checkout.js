@@ -33,11 +33,7 @@ Page({
   },
 
   onLoad() {
-    if (!auth.isLoggedIn()) {
-      store.setLoginReturn({ page: 'checkout', mode: 'back' });
-      nav.go('login');
-      return;
-    }
+    if (!auth.requireLogin('checkout', 'back')) return;
     const selected = store.getSelectedService({ code: 'PRO' });
     this.applyPackage(selected && selected.code ? getIndexByCode(selected.code) : 2);
   },
@@ -116,11 +112,7 @@ Page({
   // 校验顺序与文案与原型一致（shared/app.js 211-218 行）
   onPay() {
     if (this.data.paying) return;
-    if (!auth.isLoggedIn()) {
-      store.setLoginReturn({ page: 'checkout', mode: 'back' });
-      nav.go('login');
-      return;
-    }
+    if (!auth.requireLogin('checkout', 'back')) return;
     const id = this.data.gameId.trim();
     const server = this.data.server;
     const adult = this.data.adult;

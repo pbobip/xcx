@@ -149,6 +149,61 @@ test('云端登录顾客选择套餐后可以继续打开确认订单', () => {
   );
 });
 
+test('访客打开消息页时先登录，登录后返回消息页', async () => {
+  const messages = loadPage('pages/messages/messages.js');
+
+  messages.page.onShow();
+
+  assert.equal(messages.calls.at(-1).url, '/pages/login/login');
+  assert.deepEqual(messages.storage.get('bbx_login_return'), {
+    page: 'messages',
+    mode: 'redirect'
+  });
+
+  const login = loadPage('pages/login/login.js', {
+    bbx_login_return: messages.storage.get('bbx_login_return')
+  });
+  await login.page.onWechatLogin();
+
+  assert.deepEqual(login.calls.at(-1), {
+    type: 'switchTab',
+    url: '/pages/messages/messages'
+  });
+});
+
+test('访客从个人中心进入订单时先登录并保留目标页', () => {
+  const profile = loadPage('pages/profile/profile.js');
+
+  profile.page.goOrders({ currentTarget: { dataset: { status: '进行中' } } });
+
+  assert.equal(profile.calls.at(-1).url, '/pages/login/login');
+  assert.deepEqual(profile.storage.get('bbx_login_return'), {
+    page: 'orders',
+    mode: 'redirect'
+  });
+});
+
+test('访客不能绕过订单、优惠券和投诉等顾客资料页登录门禁', () => {
+  const protectedPages = [
+    ['pages/orders/orders.js', 'orders', 'onLoad'],
+    ['pages/coupons/coupons.js', 'coupons', 'onLoad'],
+    ['pages/complaints/complaints.js', 'complaints', 'onLoad'],
+    ['pages/complaint-submit/complaint-submit.js', 'complaint-submit', 'onLoad'],
+    ['pages/order-detail/order-detail.js', 'order-detail', 'onLoad'],
+    ['pages/payment-result/payment-result.js', 'payment-result', 'onShow']
+  ];
+
+  for (const [relativePath, pageName, lifecycle] of protectedPages) {
+    const result = loadPage(relativePath);
+    result.page[lifecycle]();
+    assert.equal(result.calls.at(-1).url, '/pages/login/login');
+    assert.deepEqual(result.storage.get('bbx_login_return'), {
+      page: pageName,
+      mode: 'back'
+    });
+  }
+});
+
 test('个人中心展示云端登录返回的平台用户资料', () => {
   const profile = loadPage('pages/profile/profile.js', {
     bbx_current_user: {
@@ -167,7 +222,14 @@ test('个人中心展示云端登录返回的平台用户资料', () => {
 });
 
 test('我的订单快捷入口会把所选状态带到订单页', () => {
-  const profile = loadPage('pages/profile/profile.js');
+  const profile = loadPage('pages/profile/profile.js', {
+    bbx_current_user: {
+      id: 'users-test',
+      platformUserNo: 'BBX-TEST',
+      nickname: '微信用户',
+      avatarFileId: null
+    }
+  });
   profile.page.goOrders({ currentTarget: { dataset: { status: '进行中' } } });
 
   assert.equal(profile.storage.get('bbx_pending_tab_state'), '进行中');
@@ -201,7 +263,13 @@ test('点击订单后，详情页读取对应订单而不是固定演示订单',
   assert.equal(selected.orderNo, 'BBX-20260726-002');
 
   const detail = loadPage('pages/order-detail/order-detail.js', {
-    bbx_selected_order: selected
+    bbx_selected_order: selected,
+    bbx_current_user: {
+      id: 'users-test',
+      platformUserNo: 'BBX-TEST',
+      nickname: '微信用户',
+      avatarFileId: null
+    }
   });
   detail.page.onLoad();
 

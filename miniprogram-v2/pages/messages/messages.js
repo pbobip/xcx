@@ -1,4 +1,5 @@
 const nav = require('../../utils/nav');
+const auth = require('../../utils/auth');
 
 Page({
   data: {
@@ -30,6 +31,7 @@ Page({
     ]
   },
   onShow() {
+    if (!auth.requireLogin('messages')) return;
     const app = getApp();
     if (app.globalData.unreadMessages === 0) {
       this.setData({ messages: this.data.messages.map((message) => Object.assign({}, message, { unread: false })) });

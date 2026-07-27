@@ -1,4 +1,5 @@
 const nav = require('../../utils/nav');
+const auth = require('../../utils/auth');
 
 Page({
   data: {
@@ -7,6 +8,9 @@ Page({
       { icon: 'i-coupon', title: '支付抵扣', desc: '下单时可选择余额抵扣' },
       { icon: 'i-shield', title: '风险控制', desc: '启用前完成财务与合规评审' }
     ]
+  },
+  onLoad() {
+    auth.requireLogin('balance', 'back');
   },
   onPreview(e) {
     nav.toast(`${e.currentTarget.dataset.title}为 P1 预览能力`);

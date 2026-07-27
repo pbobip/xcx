@@ -1,6 +1,10 @@
 const nav = require('../../utils/nav');
+const auth = require('../../utils/auth');
 
 Page({
+  onLoad() {
+    auth.requireLogin('complaints', 'back');
+  },
   onNew() {
     nav.go('complaint-submit');
   },

@@ -1,5 +1,6 @@
 const nav = require('../../utils/nav');
 const store = require('../../utils/store');
+const auth = require('../../utils/auth');
 
 const DEMO_ORDERS = [
   {
@@ -55,6 +56,10 @@ Page({
     activeTab: '全部',
     orders: DEMO_ORDERS,
     empty: false
+  },
+
+  onLoad() {
+    auth.requireLogin('orders', 'back');
   },
 
   onShow() {

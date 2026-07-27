@@ -1,4 +1,5 @@
 const store = require('./store');
+const nav = require('./nav');
 
 async function login() {
   if (!wx.cloud || typeof wx.cloud.callFunction !== 'function') {
@@ -34,4 +35,11 @@ function logout() {
   store.clearCurrentUser();
 }
 
-module.exports = { login, getCurrentUser, isLoggedIn, logout };
+function requireLogin(page, mode = 'redirect') {
+  if (isLoggedIn()) return true;
+  store.setLoginReturn({ page, mode });
+  nav.go('login');
+  return false;
+}
+
+module.exports = { login, getCurrentUser, isLoggedIn, logout, requireLogin };

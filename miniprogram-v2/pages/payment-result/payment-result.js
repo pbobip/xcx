@@ -1,5 +1,6 @@
 const nav = require('../../utils/nav');
 const store = require('../../utils/store');
+const auth = require('../../utils/auth');
 
 const DEFAULT_ORDER = { orderNo: 'BBX-DEMO-001', title: '钻石段位技术陪', qty: 1, unit: '局', total: 35 };
 
@@ -11,6 +12,7 @@ Page({
     copy: '无畏契约钻石段位技术陪 · 1 局 · 实付 ¥35'
   },
   onShow() {
+    if (!auth.requireLogin('payment-result', 'back')) return;
     const order = store.getLastOrder(DEFAULT_ORDER);
     const copy = `无畏契约${order.title} · ${order.qty} ${order.unit} · 实付 ¥${order.total}`;
     this.setData({ order, copy });

@@ -26,11 +26,7 @@ Page({
 
   onChoosePlan() {
     store.setSelectedService({ code: this.data.pkg.code, source: 'service-detail' });
-    if (!auth.isLoggedIn()) {
-      store.setLoginReturn({ page: 'checkout', mode: 'redirect' });
-      nav.go('login');
-      return;
-    }
+    if (!auth.requireLogin('checkout')) return;
     nav.go('checkout');
   }
 });

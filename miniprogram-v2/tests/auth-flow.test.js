@@ -5,9 +5,10 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 
-function createMemoryCloud(openid) {
+function createMemoryCloud(openid, controls = {}) {
   const data = { users: [], messages: [] };
-  const database = {
+  function createDatabase(target) {
+    return {
     collection(name) {
       return {
         where(query) {
@@ -26,14 +27,18 @@ function createMemoryCloud(openid) {
           };
         },
         async add({ data: record }) {
-          const _id = `${name}-${data[name].length + 1}`;
-          data[name].push(Object.assign({ _id }, record));
+          if (name === 'messages' && controls.failMessageAddOnce) {
+            controls.failMessageAddOnce = false;
+            throw new Error('message insert failed');
+          }
+          const _id = `${name}-${target[name].length + 1}`;
+          target[name].push(Object.assign({ _id }, record));
           return { _id };
         },
         doc(id) {
           return {
             async update({ data: update }) {
-              const record = data[name].find((item) => item._id === id);
+              const record = target[name].find((item) => item._id === id);
               Object.assign(record, update);
               return { stats: { updated: record ? 1 : 0 } };
             }
@@ -41,6 +46,19 @@ function createMemoryCloud(openid) {
         }
       };
     }
+    };
+  }
+
+  const database = createDatabase(data);
+  database.runTransaction = async (run) => {
+    const staged = {
+      users: data.users.map((item) => Object.assign({}, item)),
+      messages: data.messages.map((item) => Object.assign({}, item))
+    };
+    const result = await run(createDatabase(staged));
+    data.users.splice(0, data.users.length, ...staged.users);
+    data.messages.splice(0, data.messages.length, ...staged.messages);
+    return result;
   };
 
   return {
@@ -111,4 +129,25 @@ test('同一微信身份重复登录复用顾客且只更新最近登录时间',
   assert.equal(memory.data.users.length, 1);
   assert.equal(memory.data.messages.length, 1);
   assert.equal(memory.data.users[0].lastLoginAt, currentTime);
+});
+
+test('建立顾客或欢迎消息失败时事务回滚，重试后只生成一套数据', async () => {
+  const { createAuthHandler } = require('../cloudfunctions/auth/handler');
+  const controls = { failMessageAddOnce: true };
+  const memory = createMemoryCloud('atomic-openid', controls);
+  const main = createAuthHandler({
+    cloud: memory.cloud,
+    now: () => new Date('2026-07-27T06:00:00.000Z'),
+    createPlatformUserNo: () => 'BBX-20260727-ATOMIC'
+  });
+
+  await assert.rejects(main({ action: 'init' }), /message insert failed/);
+  assert.equal(memory.data.users.length, 0);
+  assert.equal(memory.data.messages.length, 0);
+
+  const retry = await main({ action: 'init' });
+  assert.equal(retry.success, true);
+  assert.equal(retry.data.isFirstLogin, true);
+  assert.equal(memory.data.users.length, 1);
+  assert.equal(memory.data.messages.length, 1);
 });

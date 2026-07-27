@@ -1,9 +1,13 @@
 const nav = require('../../utils/nav');
+const auth = require('../../utils/auth');
 
 Page({
   data: {
     tabs: ['未使用', '已使用', '已过期'],
     activeTab: 0
+  },
+  onLoad() {
+    auth.requireLogin('coupons', 'back');
   },
   // 三态 segmented 仅切换 active（原型 data-segment 行为）
   onTabTap(e) {

@@ -1,5 +1,6 @@
 const nav = require('../../utils/nav');
 const store = require('../../utils/store');
+const auth = require('../../utils/auth');
 
 const DEFAULT_ORDER = {
   orderNo: 'BBX-20260726-001',
@@ -41,10 +42,12 @@ Page({
   },
 
   onLoad() {
+    if (!auth.requireLogin('order-detail', 'back')) return;
     this.loadOrder();
   },
 
   onShow() {
+    if (!auth.isLoggedIn()) return;
     this.loadOrder();
   },
 

@@ -1,5 +1,6 @@
 const nav = require('../../utils/nav');
 const store = require('../../utils/store');
+const auth = require('../../utils/auth');
 
 Page({
   data: {
@@ -14,6 +15,7 @@ Page({
   },
 
   onLoad() {
+    if (!auth.requireLogin('complaint-submit', 'back')) return;
     const lastOrder = store.getLastOrder(null);
     if (lastOrder && lastOrder.orderNo) {
       this.setData({ orderList: [`爆爆熊订单 ${lastOrder.orderNo}`] });
