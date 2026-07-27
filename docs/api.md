@@ -84,10 +84,10 @@
 
 | 动作 | 身份 | 输入 | 输出 | 幂等 |
 |---|---|---|---|---|
-| `quote` | 顾客 | 套餐 ID、数量、动态字段、优惠券 ID | 报价 ID、原价、优惠、应付、过期时间、字段校验结果 | 只读，不需要 |
-| `create` | 顾客 | 报价 ID、字段值、预约、备注、协议版本 | 服务订单、付款状态 | `idempotencyKey` 必填 |
+| `quote` | 顾客 | 套餐 ID、数量 | 套餐、数量、云端单价、原价、优惠和应付金额 | 只读，不需要 |
+| `create` | 顾客 | 套餐 ID、数量、动态字段值 | 服务订单、付款状态、是否复用原订单 | `idempotencyKey` 必填 |
 
-`quote` 必须重新读取套餐与优惠券，不使用前端单价。`create` 校验报价未过期且内容未变化，过滤敏感备注，保存不可变订单快照并锁定优惠券；新订单初始为支付 `UNPAID`、履约 `NOT_STARTED`、售后 `NONE`。
+`quote` 与 `create` 都重新读取当前套餐，不接受前端单价。Issue #5 按当前界面使用 `priceCents × quantity` 计价；选项加价和优惠券计价留给后续任务。确认订单页按套餐 `orderFields` 决定现有平台、区服、游戏 ID、服务时间、预约、备注和成年确认字段是否必填；`create` 再按同一配置校验必填、选项、预约、成年确认和敏感输入并保存不可变订单快照。新订单初始为支付 `UNPAID`、履约 `NOT_STARTED`、售后 `NONE`。
 
 ### 5.2 顾客订单
 
@@ -233,8 +233,6 @@
 | `CONFLICT` | 通用版本/并发冲突 |
 | `SERVICE_OFFLINE` | 套餐已下架 |
 | `SERVICE_PAUSED` | 套餐暂停接单 |
-| `PRICE_CHANGED` | 报价期间价格或规则已变化 |
-| `QUOTE_EXPIRED` | 报价已过期 |
 | `SENSITIVE_CONTENT` | 输入包含禁止的敏感信息 |
 | `COUPON_NOT_APPLICABLE` | 优惠券不适用 |
 | `COUPON_ALREADY_USED` | 优惠券已核销或被其他订单锁定 |

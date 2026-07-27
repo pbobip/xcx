@@ -41,7 +41,7 @@
   <!-- 下单信息 -->
   <view class="card form-card" wx:if="{{!catalogLoading && !catalogBlocked}}">
     <view class="field">
-      <view class="label">游戏平台 *</view>
+      <view class="label">游戏平台{{requiredFields.platform ? ' *' : ''}}</view>
       <view class="segmented">
         <view
           wx:for="{{platformList}}"
@@ -54,16 +54,16 @@
       </view>
     </view>
     <view class="field">
-      <view class="label">游戏区服 *</view>
+      <view class="label">游戏区服{{requiredFields.region ? ' *' : ''}}</view>
       <picker mode="selector" range="{{serverList}}" bindchange="onServerChange">
         <view class="select" hover-class="select-hover">
-          <text class="{{server ? '' : 'placeholder'}}">{{server || '请选择区服'}}</text>
+          <text class="{{server ? '' : 'placeholder'}}">{{serverLabel || '请选择区服'}}</text>
           <view class="icon icon-sm i-chevron"></view>
         </view>
       </picker>
     </view>
     <view class="field">
-      <view class="label">游戏文字 ID *</view>
+      <view class="label">游戏文字 ID{{requiredFields.gameId ? ' *' : ''}}</view>
       <input
         class="input {{idFocused ? 'focused' : ''}}"
         placeholder="仅填写游戏昵称或文字 ID"
@@ -75,7 +75,7 @@
       />
     </view>
     <view class="field">
-      <view class="label">服务时间 *</view>
+      <view class="label">服务时间{{requiredFields.serviceMode ? ' *' : ''}}</view>
       <view class="segmented">
         <view
           wx:for="{{timeList}}"
@@ -85,6 +85,17 @@
           data-index="{{index}}"
           bindtap="onTimeTap"
         >{{item}}</view>
+      </view>
+    </view>
+    <view class="field" wx:if="{{timeIndex === 1}}">
+      <view class="label">预约日期和时间 *</view>
+      <view class="row">
+        <picker mode="date" value="{{scheduledDate}}" bindchange="onScheduledDateChange">
+          <view class="select"><text class="{{scheduledDate ? '' : 'placeholder'}}">{{scheduledDate || '选择日期'}}</text></view>
+        </picker>
+        <picker mode="time" value="{{scheduledTime}}" bindchange="onScheduledTimeChange">
+          <view class="select"><text class="{{scheduledTime ? '' : 'placeholder'}}">{{scheduledTime || '选择时间'}}</text></view>
+        </picker>
       </view>
     </view>
     <view class="field">
@@ -118,7 +129,7 @@
     hover-class="{{paying || catalogLoading || catalogBlocked ? 'none' : 'btn-hover'}}"
     aria-disabled="{{paying || catalogLoading || catalogBlocked}}"
     bindtap="onPay"
-  >{{catalogLoading ? '正在校验套餐…' : catalogBlocked ? '当前不可下单' : paying ? '正在确认订单…' : '模拟微信支付'}}</view>
+  >{{catalogLoading ? '正在校验套餐…' : catalogBlocked ? '当前不可下单' : paying ? '正在创建订单…' : '创建服务订单'}}</view>
 </view>
 
 <!-- 优惠券 sheet -->

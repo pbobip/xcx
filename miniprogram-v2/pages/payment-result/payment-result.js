@@ -2,29 +2,37 @@ const nav = require('../../utils/nav');
 const store = require('../../utils/store');
 const auth = require('../../utils/auth');
 
-const DEFAULT_ORDER = { orderNo: 'BBX-DEMO-001', title: '钻石段位技术陪', qty: 1, unit: '局', total: 35 };
-
 Page({
   data: {
     icon: 'check',
-    order: DEFAULT_ORDER,
-    title: '支付成功，等待爆爆熊派单',
-    copy: '无畏契约钻石段位技术陪 · 1 局 · 实付 ¥35'
+    order: null,
+    title: '订单已创建，等待支付接入',
+    copy: '本次只创建未付款服务订单，不会产生真实扣款。'
   },
   onShow() {
     if (!auth.requireLogin('payment-result', 'back')) return;
-    const order = store.getLastOrder(DEFAULT_ORDER);
-    const copy = `无畏契约${order.title} · ${order.qty} ${order.unit} · 实付 ¥${order.total}`;
+    const order = store.getLastOrder(null);
+    if (!order) {
+      this.setData({
+        order: null,
+        title: '暂未找到新建订单',
+        copy: '请返回服务套餐重新创建订单。'
+      });
+      return;
+    }
+    const copy = `${order.title} · ${order.qty} ${order.unit} · 应付 ¥${order.total}`;
     this.setData({ order, copy });
   },
   onCopyOrderNo() {
+    if (!this.data.order) return;
     wx.setClipboardData({
-      data: this.data.order.orderNo || DEFAULT_ORDER.orderNo,
+      data: this.data.order.orderNo,
       success: () => nav.toast('订单号已复制')
     });
   },
   onViewOrder() {
-    store.setSelectedOrder(Object.assign({ status: '待服务' }, this.data.order));
+    if (!this.data.order) return;
+    store.setSelectedOrder(Object.assign({ status: '待付款' }, this.data.order));
     nav.go('order-detail');
   }
 });

@@ -41,8 +41,8 @@
 | 分类 `categories` | 6 个游戏、目录和无畏契约价格写死；其他游戏显示待配置 | 游戏、专区、套餐卡、排序、接单状态、分页 | `games`、`categories`、`service_types`、`services` | `catalog.game.list`、`catalog.category.list`、`catalog.service.list` | 游戏与套餐从云端加载；暂停接单禁止下单 |
 | 搜索 `search` | 4 条 `RESULTS`、最近词和热门词写死 | 关键词、最近搜索、热门词、套餐结果、匹配数、分页 | `services`、`games`、`categories`、`users`、`system_settings` | `catalog.search`、`customer.searchHistory.list/clear` | 不返回下架套餐；最近搜索按顾客保存 |
 | 服务详情 `service-detail` | 套餐来自 `packages.js`；完整价目写死在 WXML；评分为 `—/0` | 套餐媒体、价格、平台/区服、服务类型、履约标准、须知、评分、接单量、评价 | `services`、`reviews`、`agreements` | `catalog.service.detail`、`customer.review.list` | 价格与价目必须来自同一套餐快照；统计只来自真实订单 |
-| 确认订单 `checkout` | 套餐、价格、平台、区服写死；前端直接乘价；优惠券固定为空 | 套餐、动态字段、计价单位、数量、平台、区服、游戏 ID、预约、优惠券、协议、服务端报价 | `services`、`coupon_templates`、`user_coupons`、`agreements` | `order.quote`、`coupon.available.list`、`order.create` | 前端金额仅展示；禁止敏感信息；订单保存不可变快照 |
-| 支付结果 `payment-result` | 默认订单和“支付成功”写死；读取本地最后订单 | 订单号、支付结果、实付、付款确认时间、待服务状态、未知状态 | `orders`、`payment_records` | `payment.query`、`order.detail` | 仅云端支付结果能显示成功；支持取消和确认中 |
+| 确认订单 `checkout` | 已通过 `catalog` 读取套餐，通过 `order.quote/create` 完成当前价计价和真实建单；优惠券固定为空 | 套餐、动态字段、计价单位、数量、平台、区服、游戏 ID、预约、优惠券、协议、服务端报价 | `services`、`orders`、`order_logs`、后续优惠券集合 | `order.quote`、`order.create`、后续 `coupon.available.list` | 前端金额仅展示；禁止敏感信息；订单保存不可变快照 |
+| 支付结果 `payment-result` | 展示本次云端创建的未付款订单，明确支付尚未接入 | 订单号、支付结果、实付、付款确认时间、待服务状态、未知状态 | `orders`、`payment_records` | `payment.query`、`order.detail` | 仅云端支付结果能显示成功；支持取消和确认中 |
 | 我的订单 `orders` | 3 条 `DEMO_ORDERS` 写死 | 五标签订单、订单号、状态、套餐快照、数量、实付、时间、分页 | `orders` | `order.list` | 只能查看本人订单；五标签由三维状态映射 |
 | 订单详情 `order-detail` | 默认订单、状态标题、进度写死；退款与评价只 Toast | 订单快照、支付/履约/售后状态、时间线、派单摘要、退款、评价资格、投诉 | `orders`、`order_logs`、`dispatch_records`、`refund_records`、`reviews`、`complaints` | `order.detail`、`order.cancel/confirm/dispute`、`payment.refund.request`、`customer.review.create` | 操作按钮按真实状态显示；游戏 ID 脱敏 |
 | 消息 `messages` | 3 条演示消息；未读数来自本地 | 消息类型、标题、摘要、时间、已读、关联对象、跳转目标、未读数 | `messages` | `customer.message.list/read/readAll/unreadCount` | 状态变化产生真实消息；不建设私聊 |

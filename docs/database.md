@@ -226,8 +226,11 @@
 | `assignedStaffId` | string/null | 当前内部服务人员 |
 | `paidAt` / `startedAt` / `completedAt` / `closedAt` | date/null | 关键时间 |
 | `idempotencyKey` | string | 建单幂等键 |
+| `requestHash` | string | 套餐、数量和下单字段的规范化请求摘要，用于识别同键异参 |
 
 索引：`orderNo` 唯一；`userId + createdAt`；`userId + paymentStatus + fulfillmentStatus + createdAt`；`paymentStatus + fulfillmentStatus + scheduledAt`；`assignedStaffId + fulfillmentStatus`；`idempotencyKey + userId` 唯一。
+
+Issue #5 的 `snapshot` 固化服务套餐标识、名称、游戏、服务类型、专区、计价单位、当前单价、数量、应付金额、动态字段定义与值、详情块、履约标准、购买须知和协议。正式协议尚未提供时，开发环境只保存明确标记 `isDevelopmentPlaceholder = true` 的占位服务规则，正式运营前必须替换。
 
 ### 6.3 `order_logs`
 

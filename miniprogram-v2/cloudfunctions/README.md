@@ -42,6 +42,15 @@ cloudfunctions/
 
 部署方式与 `auth` 相同：右键 `cloudfunctions/catalog`，选择“上传并部署：云端安装依赖”。
 
+## `order` 服务订单云函数
+
+`order` 使用可信微信身份处理当前套餐计价和真实建单，支持动作：
+
+- `quote`：重新读取启用套餐，以整数分计算 `priceCents × quantity`；
+- `create`：重新计价、校验套餐动态字段和敏感输入，在事务内创建未付款服务订单与创建日志，并以 `userId + idempotencyKey` 防止重复建单。
+
+部署前建立 `orders`、`order_logs` 集合并设置为仅云函数可读写。`orders` 至少建立 `orderNo` 唯一索引和 `userId + idempotencyKey` 唯一索引。然后右键 `cloudfunctions/order`，选择“上传并部署：云端安装依赖”。
+
 ## `catalog-dev-seed` 开发模拟数据初始化
 
 `catalog-dev-seed` 只用于开发环境补充六款游戏的模拟套餐。调用时必须传入：

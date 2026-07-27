@@ -374,9 +374,13 @@ test('首页云端推荐卡打开与卡片文案一致的技术陪套餐', async
 
 test('支付结果页不向顾客暴露测试状态切换器', () => {
   const result = loadPage('pages/payment-result/payment-result.js');
+  const source = readSource('pages/payment-result/payment-result.js');
 
   assert.equal(result.page.data.tabs, undefined);
   assert.equal(result.page.onStateTap, undefined);
+  assert.doesNotMatch(source, /BBX-DEMO-001/);
+  assert.doesNotMatch(source, /支付成功/);
+  assert.match(source, /订单已创建/);
 });
 
 test('关键页面保留防重叠布局约束', () => {
