@@ -1,0 +1,77 @@
+<view class="page tab-page">
+  <view class="page-toolbar">
+    <view class="grow"></view>
+    <care-btn />
+    <view class="toolbar-action icon-only" hover-class="nav-action-hover" bindtap="onSearch" aria-label="搜索">
+      <view class="icon i-search"></view>
+    </view>
+  </view>
+  <!-- banner -->
+  <view class="banner card">
+    <view class="p eyebrow">爆爆熊电竞</view>
+    <view class="h2">无畏契约陪玩价目单</view>
+    <view class="p">娱乐陪 · 技术陪 · 甜蜜单｜不满意可申请换人</view>
+    <view class="dots">
+      <view class="dot active"></view>
+      <view class="dot"></view>
+      <view class="dot"></view>
+    </view>
+  </view>
+
+  <!-- 热门点单 -->
+  <view>
+    <view class="section-head">
+      <view class="h2">热门点单</view>
+      <view class="link" hover-class="link-hover" bindtap="goCategories">全部价目 ›</view>
+    </view>
+    <view class="service-card card" hover-class="card-press" bindtap="goDetail">
+      <view class="cover"><text>VAL</text></view>
+      <view class="service-copy">
+        <text class="tag">基础档</text>
+        <view class="h3">匹配 / 下三 / 黄金</view>
+        <view class="p">10 元一局或 20 元 / 小时</view>
+        <view class="row between">
+          <text class="old-price">爆爆熊电竞</text>
+          <text class="price">¥10/局</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 推荐 tabs 筛选 feed -->
+  <view class="recommended">
+    <view class="reference-tabs">
+      <view
+        wx:for="{{tabs}}"
+        wx:key="key"
+        class="chip reference-tab {{activeFilter === item.key ? 'active' : ''}}"
+        hover-class="reference-tab-hover"
+        data-filter="{{item.key}}"
+        bindtap="onFilter"
+      >{{item.label}}</view>
+    </view>
+    <view class="reference-list">
+      <block wx:for="{{feed}}" wx:key="code">
+      <view
+        wx:if="{{activeFilter === '全部' || item.group === activeFilter}}"
+        class="reference-card"
+        hover-class="card-press"
+        data-index="{{index}}"
+        bindtap="onFeedTap"
+      >
+        <view class="reference-cover"><text>{{item.code}}</text></view>
+        <view class="reference-copy">
+          <view class="h3">{{item.title}}</view>
+          <view class="p"><text class="tag">{{item.group}}</text>{{item.note}}</view>
+          <view class="reference-price">
+            <text>爆爆熊电竞</text>
+            <text class="strong">{{item.price}}</text>
+          </view>
+        </view>
+      </view>
+      </block>
+    </view>
+  </view>
+</view>
+
+<bbx-toast id="toast" />

@@ -1,0 +1,5 @@
+/* checkout 页特有样式：仅触摸反馈（其余全部复用 app.wxss 全局类） */
+.seg-btn-hover { background: var(--paper-accent42); }
+.step-btn-hover { background: var(--paper-accent72); }
+.top-text-hover { opacity: 0.6; }
+.select-hover { border-color: var(--surface); box-shadow: 0 0 0 6rpx var(--accent-a64); }

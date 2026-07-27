@@ -1,0 +1,2 @@
+/* 我的优惠券页特有样式 */
+.seg-btn-hover { background: var(--paper-accent42); }

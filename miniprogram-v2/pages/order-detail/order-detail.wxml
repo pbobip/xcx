@@ -1,0 +1,100 @@
+<view class="page">
+  <view class="card pad">
+    <view class="row between">
+      <view>
+        <view class="p eyebrow">{{order.status}}</view>
+        <view class="h2" style="font-size:42rpx;margin-top:12rpx">{{statusTitle}}</view>
+      </view>
+      <view class="icon i-clock"></view>
+    </view>
+    <view class="p muted" style="margin-top:20rpx">若服务不满意可申请换人；异常问题由平台售后处理。</view>
+  </view>
+
+  <view class="card pad">
+    <view class="h2" style="font-size:32rpx;margin-bottom:32rpx">履约进度</view>
+    <view class="timeline">
+      <view class="timeline-step {{progressIndex > 0 ? 'done' : ''}} {{progressIndex === 0 ? 'current' : ''}}">
+        <text class="strong">支付已确认</text>
+        <text>{{order.title}} · ¥{{order.total}}</text>
+      </view>
+      <view class="timeline-step {{progressIndex > 1 ? 'done' : ''}} {{progressIndex === 1 ? 'current' : ''}}">
+        <text class="strong">待人工派单</text>
+        <text>正在匹配符合“{{order.standard}}”要求的陪玩</text>
+      </view>
+      <view class="timeline-step {{progressIndex > 2 ? 'done' : ''}} {{progressIndex === 2 ? 'current' : ''}}">
+        <text class="strong">开始服务</text>
+        <text>陪玩到位后由平台更新进度</text>
+      </view>
+      <view class="timeline-step {{progressIndex === 3 ? 'current' : ''}}">
+        <text class="strong">完成并评价</text>
+        <text>真实评价将计入服务评分</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card form-card">
+    <view class="h2" style="font-size:32rpx">下单快照</view>
+    <view class="row between">
+      <text class="muted">订单号</text>
+      <view class="row">
+        <text class="strong mono">{{order.orderNo}}</text>
+        <text class="link" hover-class="link-hover" bindtap="copyOrderNo">复制</text>
+      </view>
+    </view>
+    <view class="row between"><text class="muted">套餐</text><text class="strong">{{order.title}}</text></view>
+    <view class="row between"><text class="muted">数量</text><text class="strong">{{order.qty}} {{order.unit}}</text></view>
+    <view class="row between"><text class="muted">服务标准</text><text class="strong">{{order.standard}}</text></view>
+    <view class="row between"><text class="muted">平台 / 区服</text><text class="strong">{{order.platform}} / {{order.server}}</text></view>
+    <view class="row between"><text class="muted">游戏 ID</text><text class="strong mono">已脱敏</text></view>
+    <view class="row between"><text class="muted">实付</text><text class="strong price">¥{{order.total}}</text></view>
+  </view>
+
+  <view class="grid-2">
+    <view class="btn btn-secondary" hover-class="btn-hover" bindtap="openRefund">申请退款</view>
+    <view class="btn btn-secondary" hover-class="btn-hover" bindtap="goComplaint">发起投诉</view>
+    <view class="btn btn-secondary" hover-class="btn-hover" bindtap="openReview">评价服务</view>
+    <button class="btn btn-primary contact-button" hover-class="btn-hover" open-type="contact">联系客服</button>
+  </view>
+</view>
+
+<view class="modal-backdrop {{refundOpen ? 'open' : ''}}" bindtap="closeRefund" catchtouchmove="noop">
+  <view class="dialog" catchtap="noop">
+    <view class="h2">申请退款</view>
+    <view class="p">服务未开始时，原则上支持原路全额退款；已开始服务由客服按履约情况处理。</view>
+    <view class="row">
+      <view class="btn btn-secondary" hover-class="btn-hover" bindtap="closeRefund">暂不申请</view>
+      <view class="btn btn-primary" hover-class="btn-hover" bindtap="submitRefund">提交申请</view>
+    </view>
+  </view>
+</view>
+
+<view class="modal-backdrop {{reviewOpen ? 'open' : ''}}" bindtap="closeReview" catchtouchmove="noop">
+  <view class="sheet" catchtap="noop">
+    <view class="sheet-handle"></view>
+    <view class="h2">评价服务</view>
+    <view class="p muted">只有已完成订单可提交，评分将真实计入聚合。</view>
+    <view class="field" style="margin-top:28rpx">
+      <view class="label">技术水平 / 服务态度 / 响应速度</view>
+      <view class="segmented">
+        <view
+          wx:for="{{scores}}"
+          wx:key="*this"
+          class="seg-btn {{reviewScore === item ? 'active' : ''}}"
+          hover-class="row-hover"
+          bindtap="onScore"
+          data-score="{{item}}"
+        >{{item}}</view>
+      </view>
+    </view>
+    <textarea
+      class="textarea"
+      style="margin-top:28rpx"
+      placeholder="写下真实体验，不得包含隐私信息"
+      placeholder-class="ph-paper"
+      value="{{reviewText}}"
+      bindinput="onReviewInput"
+    ></textarea>
+    <view class="btn btn-primary" hover-class="btn-hover" style="width:100%;margin-top:28rpx" bindtap="submitReview">提交评价</view>
+  </view>
+</view>
+<bbx-toast id="toast" />

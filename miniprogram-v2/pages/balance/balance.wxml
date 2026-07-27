@@ -1,0 +1,18 @@
+<view class="page">
+  <view class="banner card">
+    <view class="p eyebrow">功能开关默认关闭</view>
+    <view class="h2">余额能力预览</view>
+    <view class="p">上线前需单独确认预付资金、退款和财务规则，不支持自由提现。</view>
+  </view>
+  <view class="card list">
+    <view class="list-row" wx:for="{{rows}}" wx:key="title" hover-class="row-hover" bindtap="onPreview" data-title="{{item.title}}">
+      <view class="icon {{item.icon}}"></view>
+      <view class="grow">
+        <view class="h3">{{item.title}}</view>
+        <view class="p">{{item.desc}}</view>
+      </view>
+      <view class="icon i-chevron"></view>
+    </view>
+  </view>
+</view>
+<bbx-toast id="toast" />

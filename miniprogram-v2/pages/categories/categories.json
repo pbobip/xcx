@@ -1,0 +1,7 @@
+{
+  "usingComponents": {
+    "bbx-toast": "/components/bbx-toast/bbx-toast",
+    "care-btn": "/components/care-btn/care-btn"
+  },
+  "navigationBarTitleText": "游戏分类"
+}

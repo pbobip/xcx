@@ -1,0 +1,20 @@
+.bbx-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 200rpx;
+  transform: translateX(-50%) translateY(40rpx);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 100;
+  padding: 20rpx 28rpx;
+  border-radius: 1998rpx;
+  background: var(--fg);
+  color: var(--surface);
+  font-size: 24rpx;
+  transition: 0.2s ease;
+  white-space: nowrap;
+}
+.bbx-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}

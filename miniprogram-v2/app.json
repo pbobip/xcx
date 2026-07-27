@@ -1,0 +1,62 @@
+{
+  "pages": [
+    "pages/login/login",
+    "pages/home/home",
+    "pages/categories/categories",
+    "pages/messages/messages",
+    "pages/profile/profile",
+    "pages/search/search",
+    "pages/service-detail/service-detail",
+    "pages/checkout/checkout",
+    "pages/payment-result/payment-result",
+    "pages/orders/orders",
+    "pages/order-detail/order-detail",
+    "pages/coupons/coupons",
+    "pages/complaints/complaints",
+    "pages/complaint-submit/complaint-submit",
+    "pages/settings/settings",
+    "pages/balance/balance",
+    "pages/invite/invite"
+  ],
+  "window": {
+    "navigationBarTitleText": "爆爆熊电竞",
+    "navigationBarTextStyle": "white",
+    "navigationBarBackgroundColor": "#251242",
+    "backgroundColor": "#251242",
+    "backgroundTextStyle": "light"
+  },
+  "tabBar": {
+    "color": "#eadfea",
+    "selectedColor": "#f3c0ef",
+    "backgroundColor": "#461179",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/home/home",
+        "text": "首页",
+        "iconPath": "assets/tabbar/home.png",
+        "selectedIconPath": "assets/tabbar/home-active.png"
+      },
+      {
+        "pagePath": "pages/categories/categories",
+        "text": "分类",
+        "iconPath": "assets/tabbar/category.png",
+        "selectedIconPath": "assets/tabbar/category-active.png"
+      },
+      {
+        "pagePath": "pages/profile/profile",
+        "text": "我的",
+        "iconPath": "assets/tabbar/profile.png",
+        "selectedIconPath": "assets/tabbar/profile-active.png"
+      },
+      {
+        "pagePath": "pages/messages/messages",
+        "text": "消息",
+        "iconPath": "assets/tabbar/message.png",
+        "selectedIconPath": "assets/tabbar/message-active.png"
+      }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

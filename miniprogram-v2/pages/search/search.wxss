@@ -1,0 +1,3 @@
+/* 搜索页特有样式：仅触摸反馈（其余类均由 app.wxss 全局提供） */
+.link-hover { opacity: 0.6; }
+.chip-hover { transform: translate(2rpx, 2rpx); }

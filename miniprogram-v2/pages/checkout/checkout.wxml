@@ -1,0 +1,136 @@
+<view class="page has-sticky">
+  <!-- 订单摘要 -->
+  <view class="card form-card">
+    <view class="service-card card" hover-class="card-press" bindtap="goDetail">
+      <view class="cover"><text>{{pkg.code}}</text></view>
+      <view class="service-copy">
+        <text class="tag">{{pkg.label}}</text>
+        <view class="h3">{{pkg.title}}</view>
+        <view class="p">{{pkg.standard}}</view>
+        <view class="row between"><text class="old-price">爆爆熊电竞</text><text class="price">¥{{pkg.unitPrice}}/{{pkg.unit}}</text></view>
+      </view>
+    </view>
+    <view class="field">
+      <view class="label">服务套餐 *</view>
+      <view class="segmented">
+        <view
+          wx:for="{{pkgList}}"
+          wx:key="*this"
+          class="seg-btn {{pkgIndex === index ? 'active' : ''}}"
+          hover-class="seg-btn-hover"
+          data-index="{{index}}"
+          bindtap="onPkgTap"
+        >{{item}}</view>
+      </view>
+    </view>
+    <view class="row between">
+      <text>购买数量（{{pkg.unit}}）</text>
+      <view class="stepper">
+        <view class="step-btn" hover-class="step-btn-hover" data-step="-1" bindtap="onStep">−</view>
+        <text class="out">{{qty}}</text>
+        <view class="step-btn" hover-class="step-btn-hover" data-step="1" bindtap="onStep">＋</view>
+      </view>
+    </view>
+    <view class="row between">
+      <text>优惠券</text>
+      <view class="top-text" hover-class="top-text-hover" bindtap="openCoupon">暂无可用 ›</view>
+    </view>
+    <view class="row between">
+      <text>单价</text>
+      <text class="strong price">¥{{pkg.unitPrice}} / {{pkg.unit}}</text>
+    </view>
+  </view>
+
+  <!-- 下单信息 -->
+  <view class="card form-card">
+    <view class="field">
+      <view class="label">游戏平台 *</view>
+      <view class="segmented">
+        <view
+          wx:for="{{platformList}}"
+          wx:key="*this"
+          class="seg-btn {{platformIndex === index ? 'active' : ''}}"
+          hover-class="seg-btn-hover"
+          data-index="{{index}}"
+          bindtap="onPlatformTap"
+        >{{item}}</view>
+      </view>
+    </view>
+    <view class="field">
+      <view class="label">游戏区服 *</view>
+      <picker mode="selector" range="{{serverList}}" bindchange="onServerChange">
+        <view class="select" hover-class="select-hover">
+          <text class="{{server ? '' : 'placeholder'}}">{{server || '请选择区服'}}</text>
+          <view class="icon icon-sm i-chevron"></view>
+        </view>
+      </picker>
+    </view>
+    <view class="field">
+      <view class="label">游戏文字 ID *</view>
+      <input
+        class="input {{idFocused ? 'focused' : ''}}"
+        placeholder="仅填写游戏昵称或文字 ID"
+        placeholder-class="ph-paper"
+        value="{{gameId}}"
+        bindinput="onIdInput"
+        bindfocus="onIdFocus"
+        bindblur="onIdBlur"
+      />
+    </view>
+    <view class="field">
+      <view class="label">服务时间 *</view>
+      <view class="segmented">
+        <view
+          wx:for="{{timeList}}"
+          wx:key="*this"
+          class="seg-btn {{timeIndex === index ? 'active' : ''}}"
+          hover-class="seg-btn-hover"
+          data-index="{{index}}"
+          bindtap="onTimeTap"
+        >{{item}}</view>
+      </view>
+    </view>
+    <view class="field">
+      <view class="label">点单备注</view>
+      <textarea
+        class="textarea {{noteFocused ? 'focused' : ''}}"
+        placeholder="可填写位置、偏好或称呼；禁止填写密码、验证码"
+        placeholder-class="ph-paper"
+        value="{{note}}"
+        bindinput="onNoteInput"
+        bindfocus="onNoteFocus"
+        bindblur="onNoteBlur"
+      ></textarea>
+    </view>
+    <view class="checkrow" hover-class="row-hover" bindtap="toggleAdult">
+      <view class="checkbox {{adult ? 'checked' : ''}}"><view class="icon i-check"></view></view>
+      <text>本人已成年，并已阅读换人、售后、退款与账号安全规则。</text>
+    </view>
+    <view class="p error">{{error}}</view>
+  </view>
+</view>
+
+<!-- 底部支付操作条 -->
+<view class="sticky-action">
+  <view>
+    <text class="muted" style="font-size:20rpx">实付金额</text>
+    <text class="strong price" style="display:block">¥{{total}}</text>
+  </view>
+  <view
+    class="btn btn-primary {{paying ? 'disabled' : ''}}"
+    hover-class="btn-hover"
+    bindtap="onPay"
+  >{{paying ? '正在确认订单…' : '模拟微信支付'}}</view>
+</view>
+
+<!-- 优惠券 sheet -->
+<view class="modal-backdrop {{couponOpen ? 'open' : ''}}" bindtap="closeCoupon" catchtouchmove="noop">
+  <view class="sheet" catchtap="noop">
+    <view class="sheet-handle"></view>
+    <view class="h2">优惠券</view>
+    <view class="p muted" style="margin:12rpx 0 28rpx">当前套餐暂无可用优惠券。</view>
+    <view class="btn btn-secondary" style="width:100%" hover-class="btn-hover" bindtap="closeCoupon">知道了</view>
+  </view>
+</view>
+
+<bbx-toast id="toast" />

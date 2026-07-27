@@ -1,0 +1,88 @@
+/* home 页专属样式（原型 renderHome 内联 <style> 的转换结果） */
+.recommended { margin: 28rpx -28rpx 0; }
+.reference-tabs {
+  display: flex;
+  gap: 36rpx;
+  overflow-x: auto;
+  padding: 0 28rpx;
+  border-bottom: 2rpx solid var(--border-a46);
+}
+.reference-tab {
+  flex: 0 0 auto;
+  min-height: 88rpx;
+  padding: 0 0 16rpx;
+  display: flex;
+  align-items: center;
+  border: 0;
+  border-bottom: 6rpx solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: none;
+}
+.reference-tab.active {
+  border-bottom-color: var(--accent);
+  background: transparent;
+  color: var(--accent);
+  box-shadow: none;
+}
+.reference-list { padding: 20rpx 28rpx 0; }
+.reference-card {
+  min-height: 212rpx;
+  display: grid;
+  grid-template-columns: 164rpx minmax(0, 1fr);
+  gap: 22rpx;
+  padding: 20rpx;
+  margin-bottom: 20rpx;
+  border: 4rpx solid var(--ink);
+  border-radius: 34rpx;
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: 8rpx 8rpx 0 var(--ink);
+}
+.reference-cover {
+  aspect-ratio: 1;
+  border: 4rpx solid var(--ink);
+  border-radius: 26rpx;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 900;
+  font-size: 36rpx;
+  line-height: 1;
+  color: var(--fg);
+  box-shadow: inset 0 0 0 8rpx var(--accent-a18);
+}
+.reference-copy { min-width: 0; display: flex; flex-direction: column; gap: 10rpx; }
+.reference-copy .h3 { font-size: 28rpx; line-height: 1.35; color: var(--accent); font-weight: 700; }
+.reference-copy .p {
+  font-size: 22rpx;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reference-copy .tag { margin-right: 12rpx; padding: 4rpx 12rpx; }
+.reference-price {
+  margin-top: auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+.reference-price text { font-size: 20rpx; color: var(--muted); }
+.reference-price .strong {
+  font-family: var(--font-mono);
+  font-weight: 900;
+  font-size: 30rpx;
+  line-height: 1;
+  color: var(--accent);
+}
+
+/* 触摸反馈（本页专属 hover-class） */
+.reference-tab-hover { opacity: 0.72; }
+.link-hover { opacity: 0.72; }

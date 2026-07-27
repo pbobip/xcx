@@ -1,0 +1,3 @@
+<button class="toolbar-action toolbar-button icon-only care-button" hover-class="nav-action-hover" open-type="contact" bindtap="onTap" aria-label="联系客服">
+  <view class="icon i-care"></view>
+</button>

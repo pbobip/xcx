@@ -1,0 +1,29 @@
+/* 分类页在窄屏中采用纵向服务卡，避免左侧游戏菜单挤压商品文字。 */
+.category-shell { grid-template-columns: 164rpx minmax(0, 1fr); }
+.category-menu .category-item {
+  padding-left: 12rpx;
+  padding-right: 12rpx;
+  font-size: 22rpx;
+  white-space: nowrap;
+}
+.category-list .service-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  padding: 20rpx;
+}
+.category-list .cover {
+  width: 100%;
+  height: 112rpx;
+  aspect-ratio: auto;
+}
+.category-list .service-copy { gap: 8rpx; }
+.category-list .service-copy .h3 { font-size: 24rpx; }
+.category-list .service-copy .p {
+  font-size: 20rpx;
+  white-space: normal;
+  line-height: 1.45;
+}
+.category-list .row.between { gap: 8rpx; }
+.category-list .price { margin-left: auto; font-size: 22rpx; }
+.unavailable { opacity: 0.72; }

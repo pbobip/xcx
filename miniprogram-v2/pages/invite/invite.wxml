@@ -1,0 +1,10 @@
+<view class="page">
+  <view class="card empty">
+    <view>
+      <view class="empty-mark"><view class="icon i-user"></view></view>
+      <view class="h2">邀请奖励仅使用优惠券</view>
+      <view class="p">功能默认关闭；正式启用后支持微信分享卡片或原创海报，并防范自邀与刷券。</view>
+      <button class="btn btn-primary share-button" style="margin-top:40rpx" hover-class="btn-hover" open-type="share">分享给微信好友</button>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,1 @@
+<view class="bbx-toast {{visible ? 'show' : ''}}">{{msg}}</view>

@@ -1,0 +1,12 @@
+<view class="login">
+  <view class="login-brand">
+    <view class="login-mark">爆</view>
+    <view class="h1">爆爆熊电竞，陪你玩得尽兴。</view>
+    <view class="p">无畏契约娱乐陪、技术陪和甜蜜单，浏览无需登录，选择套餐前完成微信授权。</view>
+  </view>
+  <view class="login-actions">
+    <view class="btn btn-primary" hover-class="btn-hover" bindtap="onWechatLogin">微信一键登录</view>
+    <view class="btn btn-secondary" style="margin-top:20rpx" hover-class="btn-hover" bindtap="onBrowseCatalog">先看价目单</view>
+    <view class="small">登录即表示同意《用户协议》与《隐私政策》</view>
+  </view>
+</view>

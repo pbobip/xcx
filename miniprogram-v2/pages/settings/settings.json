@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "设置中心",
+  "usingComponents": {
+    "bbx-toast": "/components/bbx-toast/bbx-toast"
+  }
+}

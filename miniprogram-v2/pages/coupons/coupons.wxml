@@ -1,0 +1,19 @@
+<view class="page">
+  <view class="segmented">
+    <view
+      wx:for="{{tabs}}"
+      wx:key="*this"
+      class="seg-btn {{activeTab === index ? 'active' : ''}}"
+      hover-class="seg-btn-hover"
+      data-index="{{index}}"
+      bindtap="onTabTap">{{item}}</view>
+  </view>
+  <view class="empty card">
+    <view>
+      <view class="empty-mark"><view class="icon i-coupon"></view></view>
+      <view class="h2">暂无可用优惠券</view>
+      <view class="p">当前价目按爆爆熊电竞公示价格结算，有活动时会在这里展示。</view>
+      <view class="btn btn-primary" hover-class="btn-hover" style="margin-top:36rpx" bindtap="onViewCatalog">查看价目单</view>
+    </view>
+  </view>
+</view>

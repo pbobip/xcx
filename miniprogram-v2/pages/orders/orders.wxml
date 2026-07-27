@@ -1,0 +1,54 @@
+<view class="page">
+  <view class="segmented">
+    <view
+      wx:for="{{tabs}}"
+      wx:key="*this"
+      class="seg-btn {{activeTab === item ? 'active' : ''}}"
+      hover-class="row-hover"
+      bindtap="onTab"
+      data-status="{{item}}"
+    >{{item}}</view>
+  </view>
+
+  <view>
+    <view
+      wx:for="{{orders}}"
+      wx:key="id"
+      class="order-card card"
+      hidden="{{activeTab !== '全部' && item.status !== activeTab}}"
+    >
+      <view class="row between">
+        <text class="meta muted">爆爆熊订单 {{item.orderNo}}</text>
+        <text class="status {{item.status === '待服务' ? 'warn' : ''}}">{{item.status}}</text>
+      </view>
+      <view class="service-card card" hover-class="card-press" bindtap="goServiceDetail" data-index="{{index}}">
+        <view class="cover"><text>{{item.code}}</text></view>
+        <view class="service-copy">
+          <text class="tag">{{item.label}}</text>
+          <view class="h3">{{item.title}}</view>
+          <view class="p">{{item.summary}}</view>
+          <view class="row between">
+            <text class="old-price">爆爆熊电竞</text>
+            <text class="price">¥{{item.total}}</text>
+          </view>
+        </view>
+      </view>
+      <view class="row between">
+        <text class="muted">实付：¥{{item.total}}</text>
+        <view class="order-actions">
+          <button class="btn btn-secondary contact-button" hover-class="btn-hover" open-type="contact">联系客服</button>
+          <view class="btn btn-secondary" hover-class="btn-hover" bindtap="goOrderDetail" data-index="{{index}}">查看进度</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="empty card" wx:if="{{empty}}">
+    <view>
+      <view class="empty-mark"><view class="icon i-order"></view></view>
+      <view class="h2">当前没有订单</view>
+      <view class="p">切换其他状态，或从首页选择服务。</view>
+    </view>
+  </view>
+</view>
+<bbx-toast id="toast" />

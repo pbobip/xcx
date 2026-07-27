@@ -1,0 +1,14 @@
+.care-button {
+  width: var(--tap);
+  min-width: var(--tap);
+  max-width: var(--tap);
+  height: var(--tap);
+  min-height: var(--tap);
+  max-height: var(--tap);
+  padding: 0;
+  margin: 0;
+  color: var(--fg);
+}
+.care-button::after {
+  border: none;
+}

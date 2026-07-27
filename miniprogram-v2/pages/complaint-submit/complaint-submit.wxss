@@ -1,0 +1,13 @@
+/* 提交售后页特有样式（其余复用全局 app.wxss） */
+
+/* picker 触摸反馈 */
+.select-hover { border-color: var(--surface); }
+
+/* select 右侧下拉箭头（chevron 旋转 90 度朝下） */
+.select-arrow {
+  transform: rotate(90deg);
+  color: var(--paper-ink52);
+}
+
+/* 上传占位按钮触摸反馈 */
+.upload-hover { background: var(--paper-accent42); }

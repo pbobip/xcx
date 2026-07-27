@@ -1,0 +1,2 @@
+/* 支付结果页特有样式 */
+.seg-btn-hover { background: var(--paper-accent42); }

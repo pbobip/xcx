@@ -1,0 +1,28 @@
+<view class="page tab-page">
+  <view class="page-toolbar">
+    <view class="grow"></view>
+    <view class="toolbar-action" hover-class="row-hover" bindtap="onReadAll">全部已读</view>
+    <care-btn />
+  </view>
+  <view class="card list">
+    <view
+      class="list-row {{item.unread ? 'unread' : ''}}"
+      wx:for="{{messages}}"
+      wx:key="id"
+    >
+      <view class="empty-mark" style="width:80rpx;height:80rpx;margin:0">
+        <view class="icon i-{{item.icon}}"></view>
+      </view>
+      <view class="grow">
+        <view class="h3">{{item.title}}</view>
+        <view class="p">{{item.desc}}</view>
+      </view>
+      <view class="msg-tail">
+        <view class="badge" wx:if="{{item.unread}}">1</view>
+        <view class="p meta muted">{{item.time}}</view>
+      </view>
+    </view>
+  </view>
+  <view class="notice">平台仅发送订单与售后通知，不开放顾客和陪玩私聊。</view>
+</view>
+<bbx-toast id="toast" />

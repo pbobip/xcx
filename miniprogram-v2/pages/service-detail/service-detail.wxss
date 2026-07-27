@@ -1,0 +1,1 @@
+/* service-detail 页面：布局与卡片样式均由 app.wxss 全局提供（hero-cover / detail-block / metric / sticky-action 等），无页面特有样式 */

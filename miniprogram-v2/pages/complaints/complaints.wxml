@@ -1,0 +1,21 @@
+<view class="page">
+  <view class="page-toolbar">
+    <view class="grow"></view>
+    <view class="toolbar-action" hover-class="row-hover" bindtap="onNew">新建</view>
+  </view>
+  <view class="card list">
+    <view class="list-row" hover-class="row-hover" bindtap="onComplaintTap">
+      <view class="empty-mark" style="width:84rpx;height:84rpx;margin:0"><view class="icon i-flag"></view></view>
+      <view class="grow">
+        <view class="row">
+          <view class="h3">钻石技术陪售后</view>
+          <text class="status warn">处理中</text>
+        </view>
+        <view class="p">已关联爆爆熊订单 · 客服正在核实换人诉求</view>
+      </view>
+      <view class="icon i-chevron"></view>
+    </view>
+  </view>
+  <view class="notice">售后处理中会暂停订单自动完成；图片凭证仅按最小必要原则保存。</view>
+</view>
+<bbx-toast id="toast" />

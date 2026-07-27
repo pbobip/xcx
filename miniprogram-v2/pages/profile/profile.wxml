@@ -1,0 +1,73 @@
+<view class="page tab-page">
+  <view class="page-toolbar">
+    <view class="grow"></view>
+    <care-btn />
+  </view>
+  <view class="profile-head card">
+    <view class="avatar">熊</view>
+    <view class="grow">
+      <view class="h2" style="font-size:38rpx">爆爆熊用户</view>
+      <view class="p meta muted">微信用户 ID · 登录后生成</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="section-head" style="padding:24rpx 28rpx 0">
+      <view class="h2" style="font-size:32rpx">我的订单</view>
+      <view class="link" hover-class="row-hover" bindtap="goOrders">查看全部 ›</view>
+    </view>
+    <view class="grid-4">
+      <view wx:for="{{quicks}}" wx:key="label" class="quick" hover-class="row-hover" bindtap="goOrders" data-status="{{item.label}}">
+        <text class="count">{{item.count}}</text>
+        <text>{{item.label}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="card list">
+    <view class="list-row" hover-class="row-hover" bindtap="goCoupons">
+      <view class="icon i-coupon"></view>
+      <view class="grow">
+        <view class="h3">我的优惠券</view>
+        <view class="p">活动优惠将在这里展示</view>
+      </view>
+      <view class="icon i-chevron"></view>
+    </view>
+    <view class="list-row" hover-class="row-hover" bindtap="goComplaints">
+      <view class="icon i-flag"></view>
+      <view class="grow">
+        <view class="h3">我的投诉</view>
+        <view class="p">查看换人和售后进度</view>
+      </view>
+      <view class="icon i-chevron"></view>
+    </view>
+    <view class="list-row" hover-class="row-hover" bindtap="goSettings">
+      <view class="icon i-settings"></view>
+      <view class="grow">
+        <view class="h3">设置中心</view>
+        <view class="p">账号、安全、通知与协议</view>
+      </view>
+      <view class="icon i-chevron"></view>
+    </view>
+  </view>
+
+  <view class="card list">
+    <view class="list-row" hover-class="row-hover" bindtap="goBalance">
+      <text class="status">P1</text>
+      <view class="grow">
+        <view class="h3">我的余额</view>
+        <view class="p">功能开关默认关闭</view>
+      </view>
+      <view class="icon i-chevron"></view>
+    </view>
+    <view class="list-row" hover-class="row-hover" bindtap="goInvite">
+      <text class="status">P1</text>
+      <view class="grow">
+        <view class="h3">邀请好友</view>
+        <view class="p">仅奖励优惠券，默认关闭</view>
+      </view>
+      <view class="icon i-chevron"></view>
+    </view>
+  </view>
+</view>
+<bbx-toast id="toast" />

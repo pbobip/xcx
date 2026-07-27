@@ -1,0 +1,6 @@
+/* 消息页特有样式：行尾徽标 + 时间列（原型中为 span+p 自然堆叠） */
+.msg-tail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}

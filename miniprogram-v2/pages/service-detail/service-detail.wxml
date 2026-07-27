@@ -1,0 +1,62 @@
+<view class="has-sticky">
+  <view class="hero-cover">
+    <view class="cover"><text>{{pkg.code}}</text></view>
+  </view>
+  <view class="page">
+    <view class="card">
+      <view class="detail-block">
+        <text class="tag">{{pkg.tag}}</text>
+        <view class="h2" style="font-size:42rpx;margin:20rpx 0 12rpx">{{pkg.title}}｜按{{pkg.unit}}计价</view>
+        <view class="p muted">爆爆熊电竞人工派单，可选择娱乐陪、技术陪或甜蜜单。</view>
+        <view class="row between" style="margin-top:28rpx">
+          <text class="old-price">{{pkg.oldPrice}}</text>
+          <text class="price">¥{{pkg.unitPrice}}/{{pkg.unit}}</text>
+        </view>
+      </view>
+      <view class="detail-block">
+        <view class="h2">完整价目</view>
+        <view class="stack">
+          <view class="row between"><text>匹配 / 下三 / 黄金</text><text class="strong">¥10/局 · ¥20/h</text></view>
+          <view class="row between"><text>铂金</text><text class="strong">娱乐 ¥15 · 技术 ¥25</text></view>
+          <view class="row between"><text>钻石</text><text class="strong">娱乐 ¥25 · 技术 ¥35</text></view>
+          <view class="row between"><text>超凡</text><text class="strong">娱乐 ¥35 · 技术 ¥45</text></view>
+          <view class="row between"><text>甜蜜单</text><text class="strong">¥52/h</text></view>
+        </view>
+      </view>
+      <view class="detail-block">
+        <view class="h2">点单需知</view>
+        <view class="grid-2">
+          <view class="card-2 pad">
+            <view class="p muted">技术奶</view>
+            <text class="strong">结算或人前三</text>
+          </view>
+          <view class="card-2 pad">
+            <view class="p muted">技术 C</view>
+            <text class="strong">白金或人前五</text>
+          </view>
+        </view>
+        <view class="p notice" style="margin-top:24rpx">不满意可申请换人，有问题由平台售后处理。具体标准以下单快照为准。</view>
+      </view>
+      <view class="detail-block">
+        <view class="h2">真实服务数据</view>
+        <view class="metric-row">
+          <view class="metric"><text class="strong">—</text><text>综合评分</text></view>
+          <view class="metric"><text class="strong">—</text><text>累计接单</text></view>
+          <view class="metric"><text class="strong">0</text><text>真实评价</text></view>
+        </view>
+        <view class="p muted" style="font-size:22rpx;margin-top:20rpx">销量、评分与评价仅由真实完成订单生成。</view>
+      </view>
+      <view class="detail-block">
+        <view class="h2">安全提示</view>
+        <view class="p notice">仅限成年人下单；请勿填写账号密码、验证码或支付凭证。</view>
+      </view>
+    </view>
+  </view>
+</view>
+
+<view class="sticky-action service-actions">
+  <button class="btn btn-secondary contact-button" hover-class="sticky-btn-hover" open-type="contact">联系客服</button>
+  <view class="btn btn-primary" hover-class="sticky-btn-hover" bindtap="onChoosePlan">选择套餐</view>
+</view>
+
+<bbx-toast id="toast" />

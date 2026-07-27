@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "我的余额 · P1",
+  "usingComponents": {
+    "bbx-toast": "/components/bbx-toast/bbx-toast"
+  }
+}
