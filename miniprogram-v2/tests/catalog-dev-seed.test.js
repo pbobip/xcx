@@ -13,6 +13,9 @@ function createMemoryCloud() {
       { _id: 'recommendation-home-main', serviceIds: ['legacy-main'] },
       { _id: 'recommendation-home-latest', serviceIds: ['legacy-latest'] },
       { _id: 'recommendation-home-newcomer', serviceIds: [] }
+    ],
+    banners: [
+      { _id: 'banner-dev-valorant', status: 'ACTIVE', isTest: true }
     ]
   };
 
@@ -21,8 +24,27 @@ function createMemoryCloud() {
     cloud: {
       database() {
         return {
+          command: {
+            in(values) {
+              return { operator: 'in', values };
+            }
+          },
           collection(name) {
             return {
+              where(query) {
+                return {
+                  async update({ data: update }) {
+                    const ids = query._id.values;
+                    let updated = 0;
+                    data[name].forEach((item) => {
+                      if (!ids.includes(item._id)) return;
+                      Object.assign(item, update);
+                      updated += 1;
+                    });
+                    return { stats: { updated } };
+                  }
+                };
+              },
               doc(id) {
                 return {
                   async set({ data: record }) {
@@ -141,8 +163,8 @@ test('重复执行开发种子只保留固定套餐并刷新三个首页推荐�
     now: () => timestamp
   });
 
-  const first = await main({ confirmToken: 'ISSUE_14_FULL_CATALOG_SEED' });
-  const second = await main({ confirmToken: 'ISSUE_14_FULL_CATALOG_SEED' });
+  const first = await main({ confirmToken: 'ISSUE_4_HOME_SEARCH_SEED' });
+  const second = await main({ confirmToken: 'ISSUE_4_HOME_SEARCH_SEED' });
 
   assert.equal(first.success, true);
   assert.deepEqual(first.data, {
@@ -150,6 +172,7 @@ test('重复执行开发种子只保留固定套餐并刷新三个首页推荐�
     newServiceCount: 11,
     refreshedServiceCount: 4,
     recommendationCount: 3,
+    bannerCount: 1,
     gameCoverage: {
       'game-valorant': 5,
       'game-lol': 2,
@@ -163,7 +186,7 @@ test('重复执行开发种子只保留固定套餐并刷新三个首页推荐�
   assert.equal(memory.data.services.length, 15);
   assert.equal(new Set(memory.data.services.map((item) => item._id)).size, 15);
   assert.equal(memory.data.services.every((item) => item.isTest === true), true);
-  assert.equal(memory.data.services.every((item) => item.seedVersion === 'issue-14-v1'), true);
+  assert.equal(memory.data.services.every((item) => item.seedVersion === 'issue-4-v1'), true);
   assert.equal(memory.data.services.every((item) => item.updatedAt === timestamp), true);
   assert.equal(memory.data.services.every((item) => /开发模拟数据/.test(item.purchaseNotice)), true);
   assert.equal(memory.data.services.every((item) => item.stats.orderCount === 0), true);
@@ -188,5 +211,53 @@ test('重复执行开发种子只保留固定套餐并刷新三个首页推荐�
       ],
       ['service-dev-newcomer']
     ]
+  );
+});
+
+test('开发种子补全套餐搜索文本并只启用本期固定首页横幅', async () => {
+  const { createCatalogDevSeedHandler } = require('../cloudfunctions/catalog-dev-seed/handler');
+  const memory = createMemoryCloud();
+  const main = createCatalogDevSeedHandler({
+    cloud: memory.cloud,
+    now: () => new Date('2026-07-27T08:00:00.000Z')
+  });
+
+  await main({ confirmToken: 'ISSUE_4_HOME_SEARCH_SEED' });
+  await main({ confirmToken: 'ISSUE_4_HOME_SEARCH_SEED' });
+
+  assert.equal(memory.data.services.length, 15);
+  assert.equal(
+    memory.data.services.every((item) => typeof item.searchText === 'string' && item.searchText.length > 0),
+    true
+  );
+  assert.match(
+    memory.data.services.find((item) => item._id === 'service-lol-companion').searchText,
+    /英雄联盟.*陪玩专区/
+  );
+  assert.match(
+    memory.data.services.find((item) => item._id === 'service-delta-escort').searchText,
+    /三角洲行动.*护航专区.*热门活动/
+  );
+  const activeBanners = memory.data.banners.filter((item) => item.status === 'ACTIVE');
+  assert.equal(activeBanners.length, 1);
+  assert.deepEqual(
+    {
+      id: activeBanners[0]._id,
+      targetType: activeBanners[0].targetType,
+      targetId: activeBanners[0].targetId,
+      status: activeBanners[0].status,
+      isTest: activeBanners[0].isTest
+    },
+    {
+      id: 'banner-home-valorant',
+      targetType: 'CATEGORY',
+      targetId: 'GAME_VALORANT',
+      status: 'ACTIVE',
+      isTest: true
+    }
+  );
+  assert.equal(
+    memory.data.banners.find((item) => item._id === 'banner-dev-valorant').status,
+    'INACTIVE'
   );
 });

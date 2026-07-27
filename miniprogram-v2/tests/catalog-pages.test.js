@@ -286,6 +286,144 @@ test('首页从云端加载横幅、最新套餐和推荐位并保持详情跳�
   assert.equal(result.calls.at(-1).url, '/pages/service-detail/service-detail');
 });
 
+test('首页横幅保留云端顺序并可跳转服务套餐详情', async () => {
+  const service = {
+    id: 'service-pro',
+    code: 'VAL_PRO',
+    name: '钻石段位技术陪',
+    subtitle: '技术提升',
+    priceCents: 3500,
+    unitLabel: '局',
+    status: 'ACTIVE',
+    purchasable: true
+  };
+  const result = loadPage('pages/home/home.js', () => success({
+    banners: [
+      {
+        id: 'banner-service',
+        title: '技术陪推荐',
+        subtitle: '查看服务套餐',
+        targetType: 'SERVICE',
+        targetId: 'service-pro'
+      },
+      {
+        id: 'banner-category',
+        title: '无畏契约专区',
+        subtitle: '查看专区',
+        targetType: 'CATEGORY',
+        targetId: 'category-game-valorant'
+      }
+    ],
+    latestServices: [],
+    recommendations: [],
+    services: [service],
+    nextCursor: null
+  }));
+
+  await result.page.onLoad();
+  result.page.onBannerTap({ currentTarget: { dataset: { index: 0 } } });
+
+  assert.deepEqual(result.page.data.banners.map((item) => item.id), [
+    'banner-service',
+    'banner-category'
+  ]);
+  assert.deepEqual(result.storage.get('bbx_selected_service'), {
+    id: 'service-pro',
+    source: 'home-banner'
+  });
+  assert.equal(result.calls.at(-1).url, '/pages/service-detail/service-detail');
+});
+
+test('首页专区横幅进入分类页后选中指定专区', async () => {
+  const home = loadPage('pages/home/home.js', () => success({
+    banners: [
+      {
+        id: 'banner-category',
+        title: '无畏契约专区',
+        subtitle: '查看专区',
+        targetType: 'CATEGORY',
+        targetId: 'GAME_VALORANT'
+      }
+    ],
+    latestServices: [],
+    recommendations: [],
+    services: [],
+    nextCursor: null
+  }));
+
+  await home.page.onLoad();
+  home.page.onBannerTap({ currentTarget: { dataset: { index: 0 } } });
+
+  assert.deepEqual(home.storage.get('bbx_pending_category_target'), {
+    targetId: 'GAME_VALORANT',
+    source: 'home-banner'
+  });
+  assert.equal(home.calls.at(-1).url, '/pages/categories/categories');
+
+  const categories = loadPage(
+    'pages/categories/categories.js',
+    (action, payload) => {
+      if (action === 'category.list') {
+        return success({
+          categories: [
+            { id: 'category-game-lol', code: 'GAME_LOL', name: '英雄联盟专区' },
+            { id: 'category-game-valorant', code: 'GAME_VALORANT', name: '无畏契约专区' }
+          ]
+        });
+      }
+      assert.equal(action, 'service.list');
+      assert.equal(payload.categoryId, 'category-game-valorant');
+      return success({ services: [], nextCursor: null });
+    },
+    Object.fromEntries(home.storage)
+  );
+
+  await categories.page.onLoad();
+
+  assert.equal(categories.page.data.activeCategoryId, 'category-game-valorant');
+  assert.equal(categories.storage.has('bbx_pending_category_target'), false);
+});
+
+test('分类页已加载时仍会在再次显示后消费首页横幅专区目标', async () => {
+  const result = loadPage(
+    'pages/categories/categories.js',
+    (action, payload) => {
+      if (action === 'category.list') {
+        return success({
+          categories: [
+            { id: 'category-game-lol', code: 'GAME_LOL', name: '英雄联盟专区' },
+            { id: 'category-game-valorant', code: 'GAME_VALORANT', name: '无畏契约专区' }
+          ]
+        });
+      }
+      assert.equal(action, 'service.list');
+      assert.ok([
+        'category-game-lol',
+        'category-game-valorant'
+      ].includes(payload.categoryId));
+      return success({ services: [], nextCursor: null });
+    }
+  );
+
+  await result.page.onLoad();
+  result.storage.set('bbx_pending_category_target', {
+    targetId: 'GAME_VALORANT',
+    source: 'home-banner'
+  });
+  await result.page.onShow();
+
+  assert.equal(result.page.data.activeCategoryId, 'category-game-valorant');
+  assert.equal(result.storage.has('bbx_pending_category_target'), false);
+  assert.equal(
+    result.calls.filter(
+      (call) => call.type === 'callFunction'
+        && call.data.action === 'service.list'
+        && call.data.payload.categoryId === 'category-game-valorant'
+    ).length,
+    1
+  );
+});
+
 test('首页最新服务不在推荐列表中重复展示', async () => {
   const service = {
     id: 'service-latest',
@@ -311,6 +449,73 @@ test('首页最新服务不在推荐列表中重复展示', async () => {
 
   assert.equal(result.page.data.hotService.id, 'service-latest');
   assert.deepEqual(result.page.data.feed.map((item) => item.id), []);
+});
+
+test('首页默认展示前三条最新服务且全部从推荐列表去重', async () => {
+  const latestServices = ['a', 'b', 'c', 'd'].map((suffix, index) => ({
+    id: `service-${suffix}`,
+    code: `LATEST_${suffix.toUpperCase()}`,
+    name: `最新服务 ${suffix.toUpperCase()}`,
+    subtitle: '开发模拟数据',
+    priceCents: 1000 + index * 100,
+    unitLabel: '局',
+    status: 'ACTIVE',
+    purchasable: true
+  }));
+  const result = loadPage('pages/home/home.js', () => success({
+    banners: [],
+    latestServices,
+    recommendations: [
+      {
+        id: 'recommend-1',
+        code: 'HOME_RECOMMENDED',
+        name: '推荐',
+        services: latestServices.slice(0, 3)
+      }
+    ],
+    services: latestServices,
+    nextCursor: null
+  }));
+
+  await result.page.onLoad();
+  result.page.goDetail({ currentTarget: { dataset: { index: 1 } } });
+
+  assert.deepEqual(
+    result.page.data.latestServices.map((item) => item.id),
+    ['service-a', 'service-b', 'service-c']
+  );
+  assert.deepEqual(result.page.data.feed.map((item) => item.id), ['service-d']);
+  assert.deepEqual(result.storage.get('bbx_selected_service'), {
+    id: 'service-b',
+    code: 'LATEST_B',
+    source: 'home-latest'
+  });
+});
+
+test('未配置最新服务时普通套餐不会被冒充为最新服务', async () => {
+  const ordinary = {
+    id: 'service-ordinary',
+    code: 'ORDINARY',
+    name: '普通推荐套餐',
+    subtitle: '未勾选最新',
+    priceCents: 2000,
+    unitLabel: '局',
+    status: 'ACTIVE',
+    purchasable: true
+  };
+  const result = loadPage('pages/home/home.js', () => success({
+    banners: [],
+    latestServices: [],
+    recommendations: [],
+    services: [ordinary],
+    nextCursor: null
+  }));
+
+  await result.page.onLoad();
+
+  assert.deepEqual(result.page.data.latestServices, []);
+  assert.equal(result.page.data.hotService, null);
+  assert.deepEqual(result.page.data.feed.map((item) => item.id), ['service-ordinary']);
 });
 
 test('首页消费云端游标加载更多并去重', async () => {
@@ -347,8 +552,8 @@ test('首页消费云端游标加载更多并去重', async () => {
   await result.page.onLoad();
   await result.page.loadMore();
 
-  assert.equal(result.page.data.hotService.id, 'service-a');
-  assert.deepEqual(result.page.data.feed.map((item) => item.id), ['service-b']);
+  assert.equal(result.page.data.hotService, null);
+  assert.deepEqual(result.page.data.feed.map((item) => item.id), ['service-a', 'service-b']);
   assert.equal(result.page.data.hasMore, false);
   assert.equal(
     result.calls.filter((call) => call.type === 'callFunction' && call.data.action === 'home').length,
@@ -362,8 +567,15 @@ test('首页展示云端横幅与套餐并覆盖加载、失败和空目录', ()
 
   assert.match(markup, /wx:if="\{\{loading\}\}"/);
   assert.match(markup, /bindtap="retry"/);
-  assert.match(markup, /banner\.title/);
-  assert.match(markup, /hotService\.name/);
+  assert.match(markup, /<swiper/);
+  assert.match(markup, /wx:for="\{\{banners\}\}"/);
+  assert.match(markup, /indicator-dots="\{\{banners\.length > 1\}\}"/);
+  assert.match(markup, /autoplay="\{\{banners\.length > 1\}\}"/);
+  assert.match(markup, /bindtap="onBannerTap"/);
+  assert.match(markup, /item\.title/);
+  assert.match(markup, /wx:for="\{\{latestServices\}\}"/);
+  assert.match(markup, /item\.name/);
+  assert.match(markup, /bindtap="goDetail"/);
   assert.match(markup, /item\.purchasable/);
   assert.match(markup, /暂无开放套餐/);
   assert.match(markup, /bindtap="loadMore"/);

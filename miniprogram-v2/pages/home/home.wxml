@@ -18,30 +18,60 @@
     </view>
   </view>
   <block wx:else>
-    <view class="banner card" wx:if="{{banner}}">
-      <view class="p eyebrow">爆爆熊电竞</view>
-      <view class="h2">{{banner.title}}</view>
-      <view class="p">{{banner.subtitle}}</view>
-    </view>
+    <swiper
+      class="banner-swiper"
+      wx:if="{{banners.length}}"
+      indicator-dots="{{banners.length > 1}}"
+      indicator-color="rgba(255, 255, 255, 0.38)"
+      indicator-active-color="#1ef2f5"
+      autoplay="{{banners.length > 1}}"
+      circular="{{banners.length > 1}}"
+      interval="5000"
+      duration="350"
+    >
+      <swiper-item wx:for="{{banners}}" wx:key="id">
+        <view class="banner-slide">
+          <view
+            class="banner card"
+            hover-class="card-press"
+            data-index="{{index}}"
+            bindtap="onBannerTap"
+          >
+            <image
+              wx:if="{{item.imageFileId}}"
+              class="banner-image"
+              src="{{item.imageFileId}}"
+              mode="aspectFill"
+            />
+            <view class="p eyebrow">爆爆熊电竞</view>
+            <view class="h2">{{item.title}}</view>
+            <view class="p">{{item.subtitle}}</view>
+          </view>
+        </view>
+      </swiper-item>
+    </swiper>
 
-    <view wx:if="{{hotService}}">
+    <view wx:if="{{latestServices.length}}">
       <view class="section-head">
         <view class="h2">最新服务</view>
         <view class="link" hover-class="link-hover" bindtap="goCategories">全部价目 ›</view>
       </view>
       <view
-        class="service-card card {{hotService.purchasable ? '' : 'unavailable'}}"
+        wx:for="{{latestServices}}"
+        wx:key="id"
+        class="service-card card {{item.purchasable ? '' : 'unavailable'}}"
         hover-class="card-press"
+        data-index="{{index}}"
         bindtap="goDetail"
       >
-        <view class="cover"><text>{{hotService.code}}</text></view>
+        <view class="cover"><text>{{item.code}}</text></view>
         <view class="service-copy">
-          <text class="tag">{{hotService.purchasable ? hotService.unitLabel + '计价' : '暂停接单'}}</text>
-          <view class="h3">{{hotService.name}}</view>
-          <view class="p">{{hotService.subtitle}}</view>
+          <text class="tag">{{item.purchasable ? item.unitLabel + '计价' : '暂停接单'}}</text>
+          <view class="h3">{{item.name}}</view>
+          <view class="p">{{item.subtitle}}</view>
           <view class="row between">
             <text class="old-price">爆爆熊电竞</text>
-            <text class="price">{{hotService.priceText}}</text>
+            <text class="price">{{item.priceText}}</text>
           </view>
         </view>
       </view>
@@ -67,7 +97,7 @@
             data-index="{{index}}"
             bindtap="onFeedTap"
           >
-            <view class="reference-cover"><text>{{item.code}}</text></view>
+            <view class="reference-cover"><text class="reference-code">{{item.code}}</text></view>
             <view class="reference-copy">
               <view class="h3">{{item.name}}</view>
               <view class="p"><text class="tag">{{item.purchasable ? item.groupLabel : '暂停接单'}}</text>{{item.subtitle}}</view>
@@ -88,7 +118,7 @@
       </view>
     </view>
 
-    <view class="empty card" wx:if="{{!hotService && !feed.length}}">
+    <view class="empty card" wx:if="{{!latestServices.length && !feed.length}}">
       <view>
         <view class="h2">暂无开放套餐</view>
         <view class="p">运营人员可在云开发控制台添加或上架服务套餐。</view>

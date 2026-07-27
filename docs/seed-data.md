@@ -120,7 +120,7 @@
 
 | title | subtitle | targetType | targetId | 状态 |
 |---|---|---|---|---|
-| 爆爆熊电竞 · 无畏契约陪玩 | 娱乐陪、技术陪和甜蜜单 | `CATEGORY` | `GAME_VALORANT` | `ACTIVE` |
+| 爆爆熊电竞 · 无畏契约陪玩 | 陪玩、护航与教学开发模拟内容 | `CATEGORY` | `GAME_VALORANT` | `ACTIVE` |
 
 图片使用项目自有或原创占位素材，不能使用参考小程序素材。
 
@@ -135,6 +135,8 @@
 | `HOME_NEWCOMER` | 新人体验 | 新人体验陪玩 | `ACTIVE` |
 
 三个推荐位的套餐 ID 不交叉；空推荐位不展示空白卡片。
+
+每个开发套餐同时写入 `searchText`，组合套餐编码、标题、摘要、游戏名、专区名、服务类型和运营关键词，用于验证首页搜索覆盖完整范围。
 
 ## 7. 优惠券模板 `coupon_templates`
 

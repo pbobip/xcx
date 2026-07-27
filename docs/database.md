@@ -168,12 +168,15 @@
 | `purchaseNotice` | string | 下单须知 |
 | `descriptionBlocks` | object[] | 详情内容块 |
 | `searchKeywords` | string[] | 运营搜索关键词 |
+| `searchText` | string | 服务标题、编码、游戏、专区、服务类型和运营关键词组成的复合检索文本 |
 | `status` | string | 内容状态 |
 | `isLatest` | boolean | 是否进入最新服务 |
 | `sort` | number | 排序值 |
 | `stats` | object | 派生的有效订单数、评价数、三维评分和综合评分 |
 
 `orderFields` 子项包含：`key`、`label`、`type`（`SINGLE`/`MULTIPLE`/`TEXT`/`NUMBER`/`DATETIME`/`NOTICE`）、`required`、`options[]`、`placeholder`、`validation`、`affectsPrice`、`customerVisible`、`sort`。
+
+`searchText` 由可信云端写接口生成，不由小程序提交。游戏、专区或服务类型改名后，后台必须同步重建相关套餐的 `searchText`。
 
 索引：`code` 唯一；`status + sort`；`gameId + status + sort`；`serviceTypeId + status + sort`；`categoryIds + status`；`isLatest + status + sort`。
 

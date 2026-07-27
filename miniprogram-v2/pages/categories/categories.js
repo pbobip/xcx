@@ -18,8 +18,12 @@ Page({
     await this.loadInitial();
   },
 
-  onShow() {
+  async onShow() {
     getApp().syncMessageBadge();
+    if (!this.data.categories.length) return;
+    const targetCategory = this.takePendingCategory(this.data.categories);
+    if (!targetCategory) return;
+    await this.selectCategory(targetCategory.id);
   },
 
   goSearch() {
@@ -31,7 +35,10 @@ Page({
     try {
       const categoryData = await catalog.call('category.list');
       const categories = categoryData.categories;
-      const activeCategoryId = categories[0] ? categories[0].id : '';
+      const targetCategory = this.takePendingCategory(categories);
+      const activeCategoryId = targetCategory
+        ? targetCategory.id
+        : categories[0] ? categories[0].id : '';
       this.setData({
         categories,
         activeCategoryId,
@@ -45,6 +52,14 @@ Page({
     } finally {
       this.setData({ loading: false });
     }
+  },
+
+  takePendingCategory(categories) {
+    const pendingTarget = store.popPendingCategoryTarget();
+    const targetId = pendingTarget && pendingTarget.targetId;
+    return targetId
+      ? categories.find((item) => item.id === targetId || item.code === targetId) || null
+      : null;
   },
 
   async loadServices(reset) {
@@ -83,8 +98,7 @@ Page({
     await this.loadInitial();
   },
 
-  async switchCategory(e) {
-    const categoryId = e.currentTarget.dataset.categoryId;
+  async selectCategory(categoryId) {
     if (!categoryId || categoryId === this.data.activeCategoryId) return;
     this.setData({ activeCategoryId: categoryId, cards: [], nextCursor: null, hasMore: false, loading: true, error: '' });
     try {
@@ -94,6 +108,10 @@ Page({
     } finally {
       this.setData({ loading: false });
     }
+  },
+
+  async switchCategory(e) {
+    await this.selectCategory(e.currentTarget.dataset.categoryId);
   },
 
   onCardTap(e) {

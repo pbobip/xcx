@@ -9,6 +9,46 @@ const ZERO_STATS = {
 
 const DEVELOPMENT_NOTICE = '开发模拟数据，价格和规则仅用于界面与流程联调，不代表正式运营报价或承诺。';
 
+const GAME_NAMES = {
+  'game-valorant': '无畏契约',
+  'game-lol': '英雄联盟',
+  'game-naraka': '永劫无间',
+  'game-delta-force': '三角洲行动',
+  'game-honor-of-kings': '王者荣耀',
+  'game-pubg': '绝地求生'
+};
+
+const SERVICE_TYPE_NAMES = {
+  'type-companion': '陪玩',
+  'type-escort': '护航',
+  'type-coaching': '教学'
+};
+
+const CATEGORY_NAMES = {
+  'category-newcomer': '新人体验',
+  'category-game-valorant': '无畏契约专区',
+  'category-game-lol': '英雄联盟专区',
+  'category-game-naraka': '永劫无间专区',
+  'category-game-delta-force': '三角洲行动专区',
+  'category-game-hok': '王者荣耀专区',
+  'category-game-pubg': '绝地求生专区',
+  'category-companion': '陪玩专区',
+  'category-escort': '护航专区',
+  'category-coaching': '教学专区',
+  'category-hot-activity': '热门活动'
+};
+
+function serviceSearchText({ code, name, subtitle, gameId, serviceTypeId, categoryIds }) {
+  return [
+    code,
+    name,
+    subtitle,
+    GAME_NAMES[gameId],
+    SERVICE_TYPE_NAMES[serviceTypeId],
+    ...(categoryIds || []).map((id) => CATEGORY_NAMES[id])
+  ].filter(Boolean).join(' ');
+}
+
 function orderFields(platforms, regions) {
   return [
     {
@@ -147,6 +187,14 @@ function createServiceSeed({
       }
     ],
     searchKeywords: [name, subtitle],
+    searchText: serviceSearchText({
+      code,
+      name,
+      subtitle,
+      gameId,
+      serviceTypeId,
+      categoryIds
+    }),
     status: 'ACTIVE',
     isLatest,
     sort,
@@ -350,6 +398,28 @@ const existingServiceCompliance = {
   stats: Object.assign({}, ZERO_STATS)
 };
 
+const existingServiceSearchText = {
+  'service-val-basic': 'VAL_BASIC 匹配 下三 黄金 无畏契约 陪玩 无畏契约专区 陪玩专区',
+  'service-val-fun': 'VAL_FUN 钻石段位娱乐陪 无畏契约 陪玩 无畏契约专区 陪玩专区',
+  'service-val-pro': 'VAL_PRO 钻石段位技术陪 无畏契约 陪玩 无畏契约专区 陪玩专区',
+  'service-val-sweet': 'VAL_SWEET 甜蜜单陪玩 无畏契约 陪玩 无畏契约专区 陪玩专区'
+};
+
+const developmentBanner = {
+  _id: 'banner-home-valorant',
+  title: '爆爆熊电竞 · 无畏契约陪玩',
+  subtitle: '陪玩、护航与教学开发模拟内容',
+  imageFileId: null,
+  targetType: 'CATEGORY',
+  targetId: 'GAME_VALORANT',
+  startAt: new Date('2026-01-01T00:00:00.000Z'),
+  endAt: new Date('2099-12-31T23:59:59.999Z'),
+  status: 'ACTIVE',
+  sort: 10
+};
+
+const legacyDevelopmentBannerIds = ['banner-dev-valorant'];
+
 const recommendationUpdates = {
   'recommendation-home-main': [
     'service-lol-coaching',
@@ -373,6 +443,9 @@ const recommendationUpdates = {
 module.exports = {
   existingServiceIds,
   existingServiceCompliance,
+  existingServiceSearchText,
+  developmentBanner,
+  legacyDevelopmentBannerIds,
   services,
   recommendationUpdates
 };

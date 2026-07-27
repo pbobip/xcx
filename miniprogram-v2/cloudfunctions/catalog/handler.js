@@ -228,7 +228,8 @@ function createCatalogHandler({ cloud, now = () => new Date(), logger = console 
         conditions.push(db.command.or([
           { name: expression },
           { subtitle: expression },
-          { searchKeywords: expression }
+          { searchKeywords: expression },
+          { searchText: expression }
         ]));
       }
       const paged = await readServicePage(db, db.command.and(conditions), settings);

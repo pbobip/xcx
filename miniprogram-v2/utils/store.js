@@ -3,6 +3,7 @@ const KEYS = {
   currentUser: 'bbx_current_user',
   loginReturn: 'bbx_login_return',
   selectedService: 'bbx_selected_service',
+  pendingCategoryTarget: 'bbx_pending_category_target',
   pendingTabState: 'bbx_pending_tab_state',
   selectedOrder: 'bbx_selected_order',
   lastOrder: 'bbx_last_order'
@@ -71,6 +72,14 @@ function getSelectedService(fallback) {
   return read(KEYS.selectedService, fallback || null);
 }
 
+function setPendingCategoryTarget(value) {
+  write(KEYS.pendingCategoryTarget, value || null);
+}
+
+function popPendingCategoryTarget() {
+  return pop(KEYS.pendingCategoryTarget);
+}
+
 function setPendingTabState(value) {
   write(KEYS.pendingTabState, value || null);
 }
@@ -105,6 +114,8 @@ module.exports = {
   popLoginReturn,
   setSelectedService,
   getSelectedService,
+  setPendingCategoryTarget,
+  popPendingCategoryTarget,
   setPendingTabState,
   popPendingTabState,
   setSelectedOrder,

@@ -384,6 +384,7 @@ test('关键页面保留防重叠布局约束', () => {
   const detailMarkup = readSource('pages/service-detail/service-detail.wxml');
   const careStyles = readSource('components/care-btn/care-btn.wxss');
   const categoryStyles = readSource('pages/categories/categories.wxss');
+  const homeStyles = readSource('pages/home/home.wxss');
   const checkoutMarkup = readSource('pages/checkout/checkout.wxml');
 
   assert.match(detailMarkup, /class="sticky-action service-actions"/);
@@ -400,6 +401,15 @@ test('关键页面保留防重叠布局约束', () => {
   assert.match(categoryStyles, /\.category-list \.service-card\s*\{[^}]*display:\s*flex/s);
   assert.match(categoryStyles, /flex-direction:\s*column/);
   assert.match(categoryStyles, /white-space:\s*normal/);
+
+  assert.match(homeStyles, /\.reference-card\s*\{[^}]*display:\s*flex/s);
+  assert.doesNotMatch(homeStyles, /\.reference-card\s*\{[^}]*grid-template-columns:/s);
+  assert.match(homeStyles, /\.reference-cover\s*\{[^}]*flex:\s*0\s+0\s+164rpx/s);
+  assert.match(homeStyles, /\.reference-cover\s*\{[^}]*width:\s*164rpx/s);
+  assert.match(homeStyles, /\.reference-cover\s*\{[^}]*height:\s*164rpx/s);
+  assert.match(homeStyles, /\.reference-copy\s*\{[^}]*flex:\s*1/s);
+  assert.match(homeStyles, /\.reference-code\s*\{[^}]*word-break:\s*break-all/s);
+  assert.doesNotMatch(homeStyles, /\.reference-cover\s+text\s*\{/);
 
   assert.match(checkoutMarkup, /class="page has-sticky"/);
   assert.match(appStyles, /\.page\.has-sticky\s*\{[^}]*padding-bottom:\s*calc\(188rpx/s);

@@ -241,12 +241,49 @@ test('搜索只返回可见套餐并支持分页', async () => {
   assert.equal(second.data.nextCursor, null);
 });
 
+test('搜索覆盖服务标题、游戏、专区、服务类型和运营关键词', async () => {
+  const { createCatalogHandler } = require('../cloudfunctions/catalog/handler');
+  const cloud = createMemoryCloud({
+    services: [
+      {
+        _id: 'service-lol-companion',
+        code: 'LOL_COMPANION_HOUR',
+        name: '双排组队',
+        subtitle: '轻松沟通',
+        searchKeywords: ['上分搭子'],
+        searchText: '双排组队 轻松沟通 英雄联盟 陪玩专区 陪玩 上分搭子',
+        gameId: 'game-lol',
+        serviceTypeId: 'type-companion',
+        categoryIds: ['category-game-lol', 'category-companion'],
+        status: 'ACTIVE',
+        sort: 10,
+        priceCents: 3900,
+        unit: 'HOUR',
+        unitLabel: '小时'
+      }
+    ]
+  });
+  const main = createCatalogHandler({ cloud });
+
+  const keywords = ['双排组队', '英雄联盟', '陪玩专区', '陪玩', '上分搭子'];
+  for (const keyword of keywords) {
+    const result = await main({ action: 'search', payload: { keyword } });
+    assert.deepEqual(
+      result.data.services.map((item) => item.code),
+      ['LOL_COMPANION_HOUR'],
+      `关键词 ${keyword} 应命中服务套餐`
+    );
+  }
+});
+
 test('首页只组合有效横幅、推荐位和可见套餐', async () => {
   const { createCatalogHandler } = require('../cloudfunctions/catalog/handler');
   const cloud = createMemoryCloud({
     banners: [
+      { _id: 'banner-priority', title: '优先活动', subtitle: '优先展示', targetType: 'CATEGORY', targetId: 'category-game-valorant', status: 'ACTIVE', sort: 5, startAt: new Date('2026-07-01T00:00:00.000Z'), endAt: new Date('2026-08-01T00:00:00.000Z') },
       { _id: 'banner-current', title: '当前活动', subtitle: '开发测试', targetType: 'SERVICE', targetId: 'service-pro', status: 'ACTIVE', sort: 10, startAt: new Date('2026-07-01T00:00:00.000Z'), endAt: new Date('2026-08-01T00:00:00.000Z') },
-      { _id: 'banner-expired', title: '过期活动', subtitle: '', targetType: 'NONE', targetId: null, status: 'ACTIVE', sort: 1, startAt: new Date('2026-06-01T00:00:00.000Z'), endAt: new Date('2026-06-30T00:00:00.000Z') }
+      { _id: 'banner-expired', title: '过期活动', subtitle: '', targetType: 'NONE', targetId: null, status: 'ACTIVE', sort: 1, startAt: new Date('2026-06-01T00:00:00.000Z'), endAt: new Date('2026-06-30T00:00:00.000Z') },
+      { _id: 'banner-disabled', title: '停用活动', subtitle: '', targetType: 'NONE', targetId: null, status: 'DISABLED', sort: 2, startAt: new Date('2026-07-01T00:00:00.000Z'), endAt: new Date('2026-08-01T00:00:00.000Z') }
     ],
     recommendations: [
       { _id: 'recommend-main', code: 'HOME_RECOMMENDED', name: '推荐', serviceIds: ['service-pro', 'service-offline'], categoryId: null, status: 'ACTIVE', sort: 10, startAt: new Date('2026-07-01T00:00:00.000Z'), endAt: new Date('2026-08-01T00:00:00.000Z') }
@@ -263,7 +300,7 @@ test('首页只组合有效横幅、推荐位和可见套餐', async () => {
 
   const result = await main({ action: 'home', payload: { limit: 10 } });
 
-  assert.deepEqual(result.data.banners.map((item) => item.title), ['当前活动']);
+  assert.deepEqual(result.data.banners.map((item) => item.title), ['优先活动', '当前活动']);
   assert.deepEqual(result.data.latestServices.map((item) => item.code), ['VAL_PRO']);
   assert.deepEqual(
     result.data.recommendations[0].services.map((item) => item.code),
