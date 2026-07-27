@@ -1,0 +1,4 @@
+interface:
+  display_name: "小程序底部导航图标"
+  short_description: "生成微信小程序 tabBar 普通态和选中态本地图标"
+  default_prompt: "使用 $wechat-tabbar-icons 为这个微信小程序生成底部 tabBar 图标。菜单名称：首页、分类、我的。"
