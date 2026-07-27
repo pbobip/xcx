@@ -314,3 +314,31 @@ test('首页服务列表消费返回的游标继续加载下一页', async () =>
   assert.deepEqual(second.data.services.map((item) => item.code), ['C']);
   assert.equal(second.data.nextCursor, null);
 });
+
+test('云数据库异常转换为统一内部错误且不泄露底层信息', async () => {
+  const { createCatalogHandler } = require('../cloudfunctions/catalog/handler');
+  const main = createCatalogHandler({
+    cloud: {
+      database() {
+        return {
+          collection() {
+            throw new Error('database credential detail');
+          }
+        };
+      }
+    },
+    logger: { error() {} }
+  });
+
+  const result = await main({ action: 'game.list', requestId: 'request-test' });
+
+  assert.deepEqual(result, {
+    success: false,
+    error: {
+      code: 'INTERNAL_ERROR',
+      message: '目录服务暂时不可用，请稍后重试',
+      details: {}
+    },
+    requestId: 'request-test'
+  });
+});

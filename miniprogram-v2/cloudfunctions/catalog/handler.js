@@ -113,11 +113,31 @@ function pageResult(records, settings) {
   };
 }
 
-function createCatalogHandler({ cloud, now = () => new Date() }) {
+async function readServicePage(db, query, settings) {
+  const result = await db
+    .collection('services')
+    .where(query)
+    .orderBy('sort', 'asc')
+    .orderBy('_id', 'asc')
+    .skip(settings.offset)
+    .limit(settings.limit + 1)
+    .get();
+  return pageResult(result.data, settings);
+}
+
+function publicServicePage(paged) {
+  return {
+    services: paged.page.map(publicServiceSummary),
+    nextCursor: paged.nextCursor
+  };
+}
+
+function createCatalogHandler({ cloud, now = () => new Date(), logger = console }) {
   const db = cloud.database();
 
   return async function main(event = {}) {
     const payload = event.payload || {};
+    try {
     if (event.action === 'game.list') {
       const result = await db
         .collection('games')
@@ -163,22 +183,11 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
       if (payload.gameId) query.gameId = payload.gameId;
       if (payload.categoryId) query.categoryIds = payload.categoryId;
       if (payload.serviceTypeId) query.serviceTypeId = payload.serviceTypeId;
-      const result = await db
-        .collection('services')
-        .where(query)
-        .orderBy('sort', 'asc')
-        .orderBy('_id', 'asc')
-        .skip(settings.offset)
-        .limit(settings.limit + 1)
-        .get();
-      const paged = pageResult(result.data, settings);
+      const paged = await readServicePage(db, query, settings);
 
       return {
         success: true,
-        data: {
-          services: paged.page.map(publicServiceSummary),
-          nextCursor: paged.nextCursor
-        },
+        data: publicServicePage(paged),
         requestId: event.requestId || ''
       };
     }
@@ -222,22 +231,11 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
           { searchKeywords: expression }
         ]));
       }
-      const result = await db
-        .collection('services')
-        .where(db.command.and(conditions))
-        .orderBy('sort', 'asc')
-        .orderBy('_id', 'asc')
-        .skip(settings.offset)
-        .limit(settings.limit + 1)
-        .get();
-      const paged = pageResult(result.data, settings);
+      const paged = await readServicePage(db, db.command.and(conditions), settings);
 
       return {
         success: true,
-        data: {
-          services: paged.page.map(publicServiceSummary),
-          nextCursor: paged.nextCursor
-        },
+        data: publicServicePage(paged),
         requestId: event.requestId || ''
       };
     }
@@ -246,7 +244,7 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
       const settings = pageSettings(payload);
       if (!settings) return failure('INVALID_ARGUMENT', '分页游标无效', event.requestId);
       const timestamp = now();
-      const [bannerResult, recommendationResult, latestResult, serviceResult] = await Promise.all([
+      const [bannerResult, recommendationResult, latestResult, paged] = await Promise.all([
         db.collection('banners').where({
           status: 'ACTIVE',
           startAt: db.command.lte(timestamp),
@@ -263,13 +261,11 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
           .orderBy('_id', 'asc')
           .limit(10)
           .get(),
-        db.collection('services')
-          .where({ status: db.command.in(['ACTIVE', 'PAUSED']) })
-          .orderBy('sort', 'asc')
-          .orderBy('_id', 'asc')
-          .skip(settings.offset)
-          .limit(settings.limit + 1)
-          .get()
+        readServicePage(
+          db,
+          { status: db.command.in(['ACTIVE', 'PAUSED']) },
+          settings
+        )
       ]);
       const recommendedIds = Array.from(new Set(
         recommendationResult.data.flatMap((item) => item.serviceIds || [])
@@ -288,7 +284,6 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
         recommendedServices = recommendedResult.data;
       }
       const serviceById = new Map(recommendedServices.map((item) => [item._id, item]));
-      const paged = pageResult(serviceResult.data, settings);
 
       return {
         success: true,
@@ -313,6 +308,14 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
     }
 
     return failure('INVALID_ARGUMENT', '不支持的目录动作', event.requestId);
+    } catch (error) {
+      logger.error('catalog action failed', {
+        action: event.action || '',
+        requestId: event.requestId || '',
+        code: error && error.code ? error.code : 'UNKNOWN'
+      });
+      return failure('INTERNAL_ERROR', '目录服务暂时不可用，请稍后重试', event.requestId);
+    }
   };
 }
 
