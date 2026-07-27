@@ -20,12 +20,12 @@
   <view class="category-shell" wx:else>
     <view class="category-menu card">
       <view
-        wx:for="{{games}}"
+        wx:for="{{categories}}"
         wx:key="id"
-        class="category-item {{item.id === activeGameId ? 'active' : ''}}"
+        class="category-item {{item.id === activeCategoryId ? 'active' : ''}}"
         hover-class="row-hover"
-        data-game-id="{{item.id}}"
-        bindtap="switchGame"
+        data-category-id="{{item.id}}"
+        bindtap="switchCategory"
       >{{item.name}}</view>
     </view>
     <view class="category-list">
@@ -33,7 +33,7 @@
         wx:for="{{cards}}"
         wx:key="id"
         class="service-card card {{item.purchasable ? '' : 'unavailable'}}"
-        hover-class="{{item.purchasable ? 'card-press' : 'none'}}"
+        hover-class="card-press"
         data-index="{{index}}"
         aria-disabled="{{!item.purchasable}}"
         bindtap="onCardTap"

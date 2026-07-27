@@ -62,7 +62,7 @@
         wx:for="{{results}}"
         wx:key="id"
         class="service-card card {{item.purchasable ? '' : 'unavailable'}}"
-        hover-class="{{item.purchasable ? 'card-press' : 'none'}}"
+        hover-class="card-press"
         data-index="{{index}}"
         bindtap="openDetail"
       >

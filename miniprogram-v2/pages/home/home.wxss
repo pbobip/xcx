@@ -89,3 +89,4 @@
 .state-card { text-align: center; }
 .state-button { margin-top: 24rpx; }
 .unavailable { opacity: 0.72; }
+.load-more { width: 100%; margin-top: 8rpx; }

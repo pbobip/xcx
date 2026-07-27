@@ -31,7 +31,7 @@
       </view>
       <view
         class="service-card card {{hotService.purchasable ? '' : 'unavailable'}}"
-        hover-class="{{hotService.purchasable ? 'card-press' : 'none'}}"
+        hover-class="card-press"
         bindtap="goDetail"
       >
         <view class="cover"><text>{{hotService.code}}</text></view>
@@ -61,9 +61,9 @@
       <view class="reference-list">
         <block wx:for="{{feed}}" wx:key="id">
           <view
-            wx:if="{{activeFilter === 'ALL' || item.group === activeFilter}}"
+            wx:if="{{!item.hidden}}"
             class="reference-card {{item.purchasable ? '' : 'unavailable'}}"
-            hover-class="{{item.purchasable ? 'card-press' : 'none'}}"
+            hover-class="card-press"
             data-index="{{index}}"
             bindtap="onFeedTap"
           >
@@ -78,6 +78,13 @@
             </view>
           </view>
         </block>
+        <button
+          class="btn btn-secondary load-more"
+          wx:if="{{hasMore && activeFilter === 'ALL'}}"
+          loading="{{loadingMore}}"
+          disabled="{{loadingMore}}"
+          bindtap="loadMore"
+        >{{loadingMore ? '加载中…' : '加载更多'}}</button>
       </view>
     </view>
 

@@ -59,16 +59,8 @@ function success(data) {
   return { success: true, data, requestId: '' };
 }
 
-test('分类页从云端加载游戏与套餐并在翻页时去重', async () => {
+test('分类页从云端加载专区与套餐并在翻页时去重', async () => {
   const responses = (action, payload) => {
-    if (action === 'game.list') {
-      return success({
-        games: [
-          { id: 'game-lol', code: 'LOL', name: '英雄联盟' },
-          { id: 'game-valorant', code: 'VALORANT', name: '无畏契约' }
-        ]
-      });
-    }
     if (action === 'category.list') {
       return success({
         categories: [
@@ -78,6 +70,7 @@ test('分类页从云端加载游戏与套餐并在翻页时去重', async () =>
       });
     }
     if (action === 'service.list' && !payload.cursor) {
+      assert.equal(payload.categoryId, 'category-lol');
       return success({
         services: [
           { id: 'service-a', code: 'VAL_A', name: '基础陪玩', subtitle: '10 元一局', priceCents: 1000, unitLabel: '局', status: 'ACTIVE', purchasable: true }
@@ -101,13 +94,36 @@ test('分类页从云端加载游戏与套餐并在翻页时去重', async () =>
   await result.page.onLoad();
   await result.page.loadMore();
 
-  assert.deepEqual(result.page.data.games.map((item) => item.name), ['英雄联盟', '无畏契约']);
+  assert.deepEqual(
+    result.page.data.categories.map((item) => item.name),
+    ['英雄联盟专区', '无畏契约专区']
+  );
   assert.deepEqual(result.page.data.cards.map((item) => item.id), ['service-a', 'service-b']);
   assert.equal(result.page.data.hasMore, false);
   assert.equal(
     result.calls.filter((call) => call.type === 'callFunction' && call.data.action === 'service.list').length,
     2
   );
+});
+
+test('暂停接单套餐仍可从列表进入详情查看', () => {
+  const result = loadPage('pages/categories/categories.js', () => {
+    throw new Error('不应发起云请求');
+  });
+  result.page.setData({
+    cards: [
+      { id: 'service-paused', code: 'VAL_PAUSED', name: '暂停套餐', purchasable: false }
+    ]
+  });
+
+  result.page.onCardTap({ currentTarget: { dataset: { index: 0 } } });
+
+  assert.deepEqual(result.storage.get('bbx_selected_service'), {
+    id: 'service-paused',
+    code: 'VAL_PAUSED',
+    source: 'categories'
+  });
+  assert.equal(result.calls.at(-1).url, '/pages/service-detail/service-detail');
 });
 
 test('分类页为加载、失败、空目录和加载更多提供明确反馈', () => {
@@ -265,6 +281,48 @@ test('首页从云端加载横幅、最新套餐和推荐位并保持详情跳�
   assert.equal(result.calls.at(-1).url, '/pages/service-detail/service-detail');
 });
 
+test('首页消费云端游标加载更多并去重', async () => {
+  const base = {
+    id: 'service-a',
+    code: 'A',
+    name: '套餐 A',
+    subtitle: '第一页',
+    priceCents: 1000,
+    unitLabel: '局',
+    purchasable: true
+  };
+  const responses = (action, payload) => {
+    assert.equal(action, 'home');
+    if (!payload.cursor) {
+      return success({
+        banners: [],
+        latestServices: [],
+        recommendations: [],
+        services: [base],
+        nextCursor: 'home-next'
+      });
+    }
+    return success({
+      banners: [],
+      latestServices: [],
+      recommendations: [],
+      services: [base, Object.assign({}, base, { id: 'service-b', code: 'B', name: '套餐 B' })],
+      nextCursor: null
+    });
+  };
+  const result = loadPage('pages/home/home.js', responses);
+
+  await result.page.onLoad();
+  await result.page.loadMore();
+
+  assert.deepEqual(result.page.data.feed.map((item) => item.id), ['service-a', 'service-b']);
+  assert.equal(result.page.data.hasMore, false);
+  assert.equal(
+    result.calls.filter((call) => call.type === 'callFunction' && call.data.action === 'home').length,
+    2
+  );
+});
+
 test('首页展示云端横幅与套餐并覆盖加载、失败和空目录', () => {
   const markup = fs.readFileSync(path.join(root, 'pages/home/home.wxml'), 'utf8');
   const source = fs.readFileSync(path.join(root, 'pages/home/home.js'), 'utf8');
@@ -275,6 +333,7 @@ test('首页展示云端横幅与套餐并覆盖加载、失败和空目录', ()
   assert.match(markup, /hotService\.name/);
   assert.match(markup, /item\.purchasable/);
   assert.match(markup, /暂无开放套餐/);
+  assert.match(markup, /bindtap="loadMore"/);
   assert.doesNotMatch(source, /无畏契约技术陪/);
 });
 

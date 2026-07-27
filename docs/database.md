@@ -187,7 +187,7 @@
 
 字段：`code`、`name`、`serviceIds[]`、`categoryId`、`startAt`、`endAt`、`status`、`sort`。
 
-索引：`code` 唯一；`status + sort`。
+索引：`code` 唯一；`status + sort`；`status + startAt + endAt + sort`。
 
 ## 6. 服务人员与订单履约
 

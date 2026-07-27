@@ -69,10 +69,22 @@ function publicBanner(record) {
   };
 }
 
+function failure(code, message, requestId) {
+  return {
+    success: false,
+    error: { code, message, details: {} },
+    requestId: requestId || ''
+  };
+}
+
 function decodeOffset(cursor) {
   if (!cursor) return 0;
-  const value = JSON.parse(Buffer.from(cursor, 'base64').toString('utf8'));
-  return Number.isInteger(value.offset) && value.offset >= 0 ? value.offset : 0;
+  try {
+    const value = JSON.parse(Buffer.from(cursor, 'base64').toString('utf8'));
+    return Number.isInteger(value.offset) && value.offset >= 0 ? value.offset : null;
+  } catch (error) {
+    return null;
+  }
 }
 
 function encodeOffset(offset) {
@@ -81,6 +93,24 @@ function encodeOffset(offset) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function pageSettings(payload) {
+  const offset = decodeOffset(payload.cursor);
+  if (offset === null) return null;
+  return {
+    limit: Math.min(50, Math.max(1, Number(payload.limit) || 20)),
+    offset
+  };
+}
+
+function pageResult(records, settings) {
+  const hasMore = records.length > settings.limit;
+  const page = records.slice(0, settings.limit);
+  return {
+    page,
+    nextCursor: hasMore ? encodeOffset(settings.offset + page.length) : null
+  };
 }
 
 function createCatalogHandler({ cloud, now = () => new Date() }) {
@@ -121,9 +151,15 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
     }
 
     if (event.action === 'service.list') {
-      const limit = Math.min(50, Math.max(1, Number(payload.limit) || 20));
-      const offset = decodeOffset(payload.cursor);
-      const query = { status: db.command.in(['ACTIVE', 'PAUSED']) };
+      const settings = pageSettings(payload);
+      if (!settings) return failure('INVALID_ARGUMENT', '分页游标无效', event.requestId);
+      const allowedStatuses = ['ACTIVE', 'PAUSED'];
+      if (payload.status && !allowedStatuses.includes(payload.status)) {
+        return failure('INVALID_ARGUMENT', '服务套餐状态过滤无效', event.requestId);
+      }
+      const query = {
+        status: payload.status || db.command.in(allowedStatuses)
+      };
       if (payload.gameId) query.gameId = payload.gameId;
       if (payload.categoryId) query.categoryIds = payload.categoryId;
       if (payload.serviceTypeId) query.serviceTypeId = payload.serviceTypeId;
@@ -132,17 +168,16 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
         .where(query)
         .orderBy('sort', 'asc')
         .orderBy('_id', 'asc')
-        .skip(offset)
-        .limit(limit + 1)
+        .skip(settings.offset)
+        .limit(settings.limit + 1)
         .get();
-      const hasMore = result.data.length > limit;
-      const page = result.data.slice(0, limit);
+      const paged = pageResult(result.data, settings);
 
       return {
         success: true,
         data: {
-          services: page.map(publicServiceSummary),
-          nextCursor: hasMore ? encodeOffset(offset + page.length) : null
+          services: paged.page.map(publicServiceSummary),
+          nextCursor: paged.nextCursor
         },
         requestId: event.requestId || ''
       };
@@ -150,11 +185,7 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
 
     if (event.action === 'service.detail') {
       if (!payload.serviceId && !payload.code) {
-        return {
-          success: false,
-          error: { code: 'INVALID_ARGUMENT', message: '缺少服务套餐标识', details: {} },
-          requestId: event.requestId || ''
-        };
+        return failure('INVALID_ARGUMENT', '缺少服务套餐标识', event.requestId);
       }
       const query = {
         status: db.command.in(['ACTIVE', 'PAUSED'])
@@ -164,11 +195,7 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
       const result = await db.collection('services').where(query).limit(1).get();
       const record = result.data[0];
       if (!record) {
-        return {
-          success: false,
-          error: { code: 'NOT_FOUND', message: '服务套餐不存在或已下架', details: {} },
-          requestId: event.requestId || ''
-        };
+        return failure('NOT_FOUND', '服务套餐不存在或已下架', event.requestId);
       }
 
       return {
@@ -180,8 +207,8 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
 
     if (event.action === 'search') {
       const keyword = String(payload.keyword || '').trim();
-      const limit = Math.min(50, Math.max(1, Number(payload.limit) || 20));
-      const offset = decodeOffset(payload.cursor);
+      const settings = pageSettings(payload);
+      if (!settings) return failure('INVALID_ARGUMENT', '分页游标无效', event.requestId);
       const conditions = [
         { status: db.command.in(['ACTIVE', 'PAUSED']) }
       ];
@@ -200,28 +227,36 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
         .where(db.command.and(conditions))
         .orderBy('sort', 'asc')
         .orderBy('_id', 'asc')
-        .skip(offset)
-        .limit(limit + 1)
+        .skip(settings.offset)
+        .limit(settings.limit + 1)
         .get();
-      const hasMore = result.data.length > limit;
-      const page = result.data.slice(0, limit);
+      const paged = pageResult(result.data, settings);
 
       return {
         success: true,
         data: {
-          services: page.map(publicServiceSummary),
-          nextCursor: hasMore ? encodeOffset(offset + page.length) : null
+          services: paged.page.map(publicServiceSummary),
+          nextCursor: paged.nextCursor
         },
         requestId: event.requestId || ''
       };
     }
 
     if (event.action === 'home') {
-      const limit = Math.min(50, Math.max(1, Number(payload.limit) || 20));
+      const settings = pageSettings(payload);
+      if (!settings) return failure('INVALID_ARGUMENT', '分页游标无效', event.requestId);
       const timestamp = now();
       const [bannerResult, recommendationResult, latestResult, serviceResult] = await Promise.all([
-        db.collection('banners').where({ status: 'ACTIVE' }).orderBy('sort', 'asc').limit(20).get(),
-        db.collection('recommendations').where({ status: 'ACTIVE' }).orderBy('sort', 'asc').limit(10).get(),
+        db.collection('banners').where({
+          status: 'ACTIVE',
+          startAt: db.command.lte(timestamp),
+          endAt: db.command.gte(timestamp)
+        }).orderBy('sort', 'asc').limit(20).get(),
+        db.collection('recommendations').where({
+          status: 'ACTIVE',
+          startAt: db.command.lte(timestamp),
+          endAt: db.command.gte(timestamp)
+        }).orderBy('sort', 'asc').limit(10).get(),
         db.collection('services')
           .where({ status: db.command.in(['ACTIVE', 'PAUSED']), isLatest: true })
           .orderBy('sort', 'asc')
@@ -232,14 +267,12 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
           .where({ status: db.command.in(['ACTIVE', 'PAUSED']) })
           .orderBy('sort', 'asc')
           .orderBy('_id', 'asc')
-          .limit(limit + 1)
+          .skip(settings.offset)
+          .limit(settings.limit + 1)
           .get()
       ]);
-      const activeRecommendations = recommendationResult.data.filter(
-        (item) => (!item.startAt || item.startAt <= timestamp) && (!item.endAt || item.endAt >= timestamp)
-      );
       const recommendedIds = Array.from(new Set(
-        activeRecommendations.flatMap((item) => item.serviceIds || [])
+        recommendationResult.data.flatMap((item) => item.serviceIds || [])
       ));
       let recommendedServices = [];
       if (recommendedIds.length) {
@@ -255,17 +288,14 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
         recommendedServices = recommendedResult.data;
       }
       const serviceById = new Map(recommendedServices.map((item) => [item._id, item]));
-      const hasMore = serviceResult.data.length > limit;
-      const page = serviceResult.data.slice(0, limit);
+      const paged = pageResult(serviceResult.data, settings);
 
       return {
         success: true,
         data: {
-          banners: bannerResult.data
-            .filter((item) => (!item.startAt || item.startAt <= timestamp) && (!item.endAt || item.endAt >= timestamp))
-            .map(publicBanner),
+          banners: bannerResult.data.map(publicBanner),
           latestServices: latestResult.data.map(publicServiceSummary),
-          recommendations: activeRecommendations.map((item) => ({
+          recommendations: recommendationResult.data.map((item) => ({
             id: item._id,
             code: item.code,
             name: item.name,
@@ -275,18 +305,14 @@ function createCatalogHandler({ cloud, now = () => new Date() }) {
               .filter(Boolean)
               .map(publicServiceSummary)
           })),
-          services: page.map(publicServiceSummary),
-          nextCursor: hasMore ? encodeOffset(page.length) : null
+          services: paged.page.map(publicServiceSummary),
+          nextCursor: paged.nextCursor
         },
         requestId: event.requestId || ''
       };
     }
 
-    return {
-      success: false,
-      error: { code: 'INVALID_ARGUMENT', message: '不支持的目录动作', details: {} },
-      requestId: event.requestId || ''
-    };
+    return failure('INVALID_ARGUMENT', '不支持的目录动作', event.requestId);
   };
 }
 

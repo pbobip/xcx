@@ -4,9 +4,8 @@ const catalog = require('../../utils/catalog');
 
 Page({
   data: {
-    games: [],
     categories: [],
-    activeGameId: '',
+    activeCategoryId: '',
     cards: [],
     nextCursor: null,
     loading: true,
@@ -30,22 +29,17 @@ Page({
   async loadInitial() {
     this.setData({ loading: true, error: '' });
     try {
-      const [gameData, categoryData] = await Promise.all([
-        catalog.call('game.list'),
-        catalog.call('category.list', { kind: 'GAME' })
-      ]);
-      const categoryGameIds = new Set(categoryData.categories.map((item) => item.gameId));
-      const games = gameData.games.filter((item) => categoryGameIds.has(item.id));
-      const activeGameId = games[0] ? games[0].id : '';
+      const categoryData = await catalog.call('category.list');
+      const categories = categoryData.categories;
+      const activeCategoryId = categories[0] ? categories[0].id : '';
       this.setData({
-        games,
-        categories: categoryData.categories,
-        activeGameId,
+        categories,
+        activeCategoryId,
         cards: [],
         nextCursor: null,
         hasMore: false
       });
-      if (activeGameId) await this.loadServices(true);
+      if (activeCategoryId) await this.loadServices(true);
     } catch (error) {
       this.setData({ error: error.message || '目录加载失败，请稍后重试' });
     } finally {
@@ -54,11 +48,11 @@ Page({
   },
 
   async loadServices(reset) {
-    const gameId = this.data.activeGameId;
-    const payload = { gameId, limit: 10 };
+    const categoryId = this.data.activeCategoryId;
+    const payload = { categoryId, limit: 10 };
     if (!reset && this.data.nextCursor) payload.cursor = this.data.nextCursor;
     const data = await catalog.call('service.list', payload);
-    if (gameId !== this.data.activeGameId) return;
+    if (categoryId !== this.data.activeCategoryId) return;
     const incoming = data.services.map((item) => Object.assign({}, item, {
       priceText: catalog.formatPrice(item.priceCents, item.unitLabel)
     }));
@@ -89,10 +83,10 @@ Page({
     await this.loadInitial();
   },
 
-  async switchGame(e) {
-    const gameId = e.currentTarget.dataset.gameId;
-    if (!gameId || gameId === this.data.activeGameId) return;
-    this.setData({ activeGameId: gameId, cards: [], nextCursor: null, hasMore: false, loading: true, error: '' });
+  async switchCategory(e) {
+    const categoryId = e.currentTarget.dataset.categoryId;
+    if (!categoryId || categoryId === this.data.activeCategoryId) return;
+    this.setData({ activeCategoryId: categoryId, cards: [], nextCursor: null, hasMore: false, loading: true, error: '' });
     try {
       await this.loadServices(true);
     } catch (error) {
@@ -104,10 +98,7 @@ Page({
 
   onCardTap(e) {
     const card = this.data.cards[Number(e.currentTarget.dataset.index)];
-    if (!card || !card.purchasable) {
-      if (card) nav.toast(card.name + '当前暂停接单');
-      return;
-    }
+    if (!card) return;
     store.setSelectedService({ id: card.id, code: card.code, source: 'categories' });
     nav.go('service-detail');
   }

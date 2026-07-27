@@ -90,10 +90,6 @@ Page({
   openDetail(e) {
     const item = this.data.results[Number(e.currentTarget.dataset.index)];
     if (!item) return;
-    if (!item.purchasable) {
-      nav.toast(item.name + '当前暂停接单');
-      return;
-    }
     store.setSelectedService({ id: item.id, code: item.code, source: 'search' });
     nav.go('service-detail');
   }

@@ -14,6 +14,8 @@ function createMemoryCloud(seed) {
     if (query && query.type === 'or') return query.conditions.some((item) => matches(record, item));
     return Object.entries(query).every(([key, value]) => {
       if (value && value.type === 'in') return value.values.includes(record[key]);
+      if (value && value.type === 'lte') return record[key] <= value.value;
+      if (value && value.type === 'gte') return record[key] >= value.value;
       if (value && value.type === 'regex') {
         const values = Array.isArray(record[key]) ? record[key] : [record[key]];
         return values.some((item) => value.pattern.test(String(item || '')));
@@ -29,6 +31,12 @@ function createMemoryCloud(seed) {
         command: {
           in(values) {
             return { type: 'in', values };
+          },
+          lte(value) {
+            return { type: 'lte', value };
+          },
+          gte(value) {
+            return { type: 'gte', value };
           },
           or(conditions) {
             return { type: 'or', conditions };
@@ -241,7 +249,7 @@ test('首页只组合有效横幅、推荐位和可见套餐', async () => {
       { _id: 'banner-expired', title: '过期活动', subtitle: '', targetType: 'NONE', targetId: null, status: 'ACTIVE', sort: 1, startAt: new Date('2026-06-01T00:00:00.000Z'), endAt: new Date('2026-06-30T00:00:00.000Z') }
     ],
     recommendations: [
-      { _id: 'recommend-main', code: 'HOME_RECOMMENDED', name: '推荐', serviceIds: ['service-pro', 'service-offline'], categoryId: null, status: 'ACTIVE', sort: 10 }
+      { _id: 'recommend-main', code: 'HOME_RECOMMENDED', name: '推荐', serviceIds: ['service-pro', 'service-offline'], categoryId: null, status: 'ACTIVE', sort: 10, startAt: new Date('2026-07-01T00:00:00.000Z'), endAt: new Date('2026-08-01T00:00:00.000Z') }
     ],
     services: [
       { _id: 'service-pro', code: 'VAL_PRO', name: '技术陪', subtitle: '钻石段位', gameId: 'game-valorant', status: 'ACTIVE', isLatest: true, sort: 10, priceCents: 3500, unit: 'ROUND', unitLabel: '局' },
@@ -262,4 +270,47 @@ test('首页只组合有效横幅、推荐位和可见套餐', async () => {
     ['VAL_PRO']
   );
   assert.deepEqual(result.data.services.map((item) => item.code), ['VAL_PRO']);
+});
+
+test('目录分页拒绝畸形游标且套餐列表支持可见状态过滤', async () => {
+  const { createCatalogHandler } = require('../cloudfunctions/catalog/handler');
+  const cloud = createMemoryCloud({
+    services: [
+      { _id: 'service-active', code: 'ACTIVE_ONE', name: '可购买套餐', gameId: 'game-1', status: 'ACTIVE', sort: 10, priceCents: 1000, unit: 'ROUND', unitLabel: '局' },
+      { _id: 'service-paused', code: 'PAUSED_ONE', name: '暂停套餐', gameId: 'game-1', status: 'PAUSED', sort: 20, priceCents: 1000, unit: 'ROUND', unitLabel: '局' }
+    ]
+  });
+  const main = createCatalogHandler({ cloud });
+
+  const invalid = await main({ action: 'service.list', payload: { cursor: 'not-a-cursor' } });
+  const paused = await main({ action: 'service.list', payload: { status: 'PAUSED' } });
+
+  assert.equal(invalid.success, false);
+  assert.equal(invalid.error.code, 'INVALID_ARGUMENT');
+  assert.deepEqual(paused.data.services.map((item) => item.code), ['PAUSED_ONE']);
+});
+
+test('首页服务列表消费返回的游标继续加载下一页', async () => {
+  const { createCatalogHandler } = require('../cloudfunctions/catalog/handler');
+  const now = new Date('2026-07-27T00:00:00.000Z');
+  const cloud = createMemoryCloud({
+    banners: [],
+    recommendations: [],
+    services: [
+      { _id: 'service-a', code: 'A', name: '套餐 A', gameId: 'game-1', status: 'ACTIVE', isLatest: true, sort: 10, priceCents: 1000, unit: 'ROUND', unitLabel: '局' },
+      { _id: 'service-b', code: 'B', name: '套餐 B', gameId: 'game-1', status: 'ACTIVE', isLatest: false, sort: 20, priceCents: 2000, unit: 'ROUND', unitLabel: '局' },
+      { _id: 'service-c', code: 'C', name: '套餐 C', gameId: 'game-1', status: 'ACTIVE', isLatest: false, sort: 30, priceCents: 3000, unit: 'ROUND', unitLabel: '局' }
+    ]
+  });
+  const main = createCatalogHandler({ cloud, now: () => now });
+
+  const first = await main({ action: 'home', payload: { limit: 2 } });
+  const second = await main({
+    action: 'home',
+    payload: { limit: 2, cursor: first.data.nextCursor }
+  });
+
+  assert.deepEqual(first.data.services.map((item) => item.code), ['A', 'B']);
+  assert.deepEqual(second.data.services.map((item) => item.code), ['C']);
+  assert.equal(second.data.nextCursor, null);
 });
