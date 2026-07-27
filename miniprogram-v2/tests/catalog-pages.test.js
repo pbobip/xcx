@@ -258,11 +258,16 @@ test('首页从云端加载横幅、最新套餐和推荐位并保持详情跳�
       status: 'ACTIVE',
       purchasable: true
     };
+    const latestService = Object.assign({}, service, {
+      id: 'service-latest',
+      code: 'LATEST',
+      name: '最新服务套餐'
+    });
     return success({
       banners: [{ id: 'banner-1', title: '云端横幅', subtitle: '开发测试内容', targetType: 'SERVICE', targetId: 'service-pro' }],
-      latestServices: [service],
+      latestServices: [latestService],
       recommendations: [{ id: 'recommend-1', code: 'HOME_RECOMMENDED', name: '推荐', services: [service] }],
-      services: [service],
+      services: [latestService, service],
       nextCursor: null
     });
   };
@@ -272,13 +277,40 @@ test('首页从云端加载横幅、最新套餐和推荐位并保持详情跳�
   result.page.onFeedTap({ currentTarget: { dataset: { index: 0 } } });
 
   assert.equal(result.page.data.banner.title, '云端横幅');
-  assert.equal(result.page.data.hotService.id, 'service-pro');
+  assert.equal(result.page.data.hotService.id, 'service-latest');
   assert.deepEqual(result.storage.get('bbx_selected_service'), {
     id: 'service-pro',
     code: 'VAL_PRO',
     source: 'home-feed'
   });
   assert.equal(result.calls.at(-1).url, '/pages/service-detail/service-detail');
+});
+
+test('首页最新服务不在推荐列表中重复展示', async () => {
+  const service = {
+    id: 'service-latest',
+    code: 'LATEST',
+    name: '最新服务套餐',
+    subtitle: '开发模拟数据',
+    priceCents: 900,
+    unitLabel: '局',
+    status: 'ACTIVE',
+    purchasable: true
+  };
+  const result = loadPage('pages/home/home.js', () => success({
+    banners: [],
+    latestServices: [service],
+    recommendations: [
+      { id: 'recommend-1', code: 'HOME_RECOMMENDED', name: '推荐', services: [service] }
+    ],
+    services: [service],
+    nextCursor: null
+  }));
+
+  await result.page.onLoad();
+
+  assert.equal(result.page.data.hotService.id, 'service-latest');
+  assert.deepEqual(result.page.data.feed.map((item) => item.id), []);
 });
 
 test('首页消费云端游标加载更多并去重', async () => {
@@ -315,7 +347,8 @@ test('首页消费云端游标加载更多并去重', async () => {
   await result.page.onLoad();
   await result.page.loadMore();
 
-  assert.deepEqual(result.page.data.feed.map((item) => item.id), ['service-a', 'service-b']);
+  assert.equal(result.page.data.hotService.id, 'service-a');
+  assert.deepEqual(result.page.data.feed.map((item) => item.id), ['service-b']);
   assert.equal(result.page.data.hasMore, false);
   assert.equal(
     result.calls.filter((call) => call.type === 'callFunction' && call.data.action === 'home').length,

@@ -41,3 +41,17 @@ cloudfunctions/
 目录集合为 `games`、`service_types`、`categories`、`services`、`banners`、`recommendations`，全部设置为仅云函数可读写。开发测试内容以仓库根目录的 `docs/seed-data.md` 为准；暂停套餐可以浏览但不可下单，下架和草稿内容不会返回给顾客端。
 
 部署方式与 `auth` 相同：右键 `cloudfunctions/catalog`，选择“上传并部署：云端安装依赖”。
+
+## `catalog-dev-seed` 开发模拟数据初始化
+
+`catalog-dev-seed` 只用于开发环境补充六款游戏的模拟套餐。调用时必须传入：
+
+```json
+{
+  "confirmToken": "ISSUE_14_FULL_CATALOG_SEED"
+}
+```
+
+它使用固定文档 ID 写入 11 个模拟套餐，刷新原有 4 个无畏契约套餐的开发合规标记，并更新 3 个互不重复的首页推荐位，因此可以重复执行且不会产生重复记录。15 个套餐统一标记 `isTest = true`，销量和评价统计保持为空或零。
+
+只可将该函数临时部署到开发环境 `cloud1-d5gmfvq70c644d633`。执行成功并通过 `catalog` 读取验收后，应立即从云端删除该函数；源代码保留在仓库中用于重新初始化。正式环境不得部署或调用。

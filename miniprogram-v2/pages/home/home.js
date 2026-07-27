@@ -11,10 +11,11 @@ function decorateService(service, group, groupLabel) {
   });
 }
 
-function composeFeed(data) {
+function composeFeed(data, excludedServiceId) {
   const feed = [];
   const byId = new Map();
   function add(service, group, groupLabel) {
+    if (service.id === excludedServiceId) return;
     const existing = byId.get(service.id);
     if (existing) {
       if (group && !existing.groupCodes.includes(group)) existing.groupCodes.push(group);
@@ -74,11 +75,11 @@ Page({
       const tabs = [{ key: 'ALL', label: '推荐' }].concat(
         recommendations.map((item) => ({ key: item.code, label: item.name }))
       );
-      const incoming = composeFeed(data);
+      const hot = data.latestServices[0] || data.services[0] || null;
+      const incoming = composeFeed(data, hot ? hot.id : null);
       const merged = reset ? incoming : catalog.mergeUnique(this.data.feed, incoming);
       const activeFilter = reset ? 'ALL' : this.data.activeFilter;
       const feed = applyFilter(merged, activeFilter);
-      const hot = data.latestServices[0] || data.services[0] || null;
       this.setData({
         banner: reset ? data.banners[0] || null : this.data.banner,
         hotService: reset

@@ -338,17 +338,22 @@ test('首页云端推荐卡打开与卡片文案一致的技术陪套餐', async
     unitLabel: '局',
     purchasable: true
   };
+  const latestService = Object.assign({}, service, {
+    id: 'service-latest',
+    code: 'LATEST',
+    name: '最新服务套餐'
+  });
   const home = loadPage('pages/home/home.js', {}, {
     cloudResponse: {
       result: {
         success: true,
         data: {
           banners: [],
-          latestServices: [service],
+          latestServices: [latestService],
           recommendations: [
             { id: 'recommend-main', code: 'HOME_RECOMMENDED', name: '推荐', services: [service] }
           ],
-          services: [service],
+          services: [latestService, service],
           nextCursor: null
         }
       }
