@@ -1,6 +1,6 @@
 const KEYS = {
   unreadMessages: 'bbx_unread_messages',
-  loggedIn: 'bbx_logged_in',
+  currentUser: 'bbx_current_user',
   loginReturn: 'bbx_login_return',
   selectedService: 'bbx_selected_service',
   pendingTabState: 'bbx_pending_tab_state',
@@ -43,12 +43,16 @@ function setUnreadMessages(count) {
   write(KEYS.unreadMessages, Math.max(0, Number(count) || 0));
 }
 
-function setLoggedIn(value) {
-  write(KEYS.loggedIn, Boolean(value));
+function setCurrentUser(user) {
+  write(KEYS.currentUser, user || null);
 }
 
-function isLoggedIn() {
-  return Boolean(read(KEYS.loggedIn, false));
+function getCurrentUser() {
+  return read(KEYS.currentUser, null);
+}
+
+function clearCurrentUser() {
+  pop(KEYS.currentUser);
 }
 
 function setLoginReturn(value) {
@@ -94,8 +98,9 @@ function getLastOrder(fallback) {
 module.exports = {
   getUnreadMessages,
   setUnreadMessages,
-  setLoggedIn,
-  isLoggedIn,
+  setCurrentUser,
+  getCurrentUser,
+  clearCurrentUser,
   setLoginReturn,
   popLoginReturn,
   setSelectedService,

@@ -3,11 +3,11 @@
     <view class="grow"></view>
     <care-btn />
   </view>
-  <view class="profile-head card">
-    <view class="avatar">熊</view>
+  <view class="profile-head card" hover-class="card-press" bindtap="goLogin">
+    <view class="avatar">{{user.avatarText}}</view>
     <view class="grow">
-      <view class="h2" style="font-size:38rpx">爆爆熊用户</view>
-      <view class="p meta muted">微信用户 ID · 登录后生成</view>
+      <view class="h2" style="font-size:38rpx">{{user.nickname}}</view>
+      <view class="p meta muted">平台用户 ID · {{user.platformUserNo}}</view>
     </view>
   </view>
 

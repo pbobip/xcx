@@ -1,5 +1,6 @@
 const nav = require('../../utils/nav');
 const store = require('../../utils/store');
+const auth = require('../../utils/auth');
 const { getPackageByCode } = require('../../utils/packages');
 
 Page({
@@ -25,7 +26,7 @@ Page({
 
   onChoosePlan() {
     store.setSelectedService({ code: this.data.pkg.code, source: 'service-detail' });
-    if (!store.isLoggedIn()) {
+    if (!auth.isLoggedIn()) {
       store.setLoginReturn({ page: 'checkout', mode: 'redirect' });
       nav.go('login');
       return;

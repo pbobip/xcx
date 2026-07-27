@@ -1,26 +1,40 @@
 const nav = require('../../utils/nav');
 const store = require('../../utils/store');
+const auth = require('../../utils/auth');
 
 Page({
-  onLoad() {
-    if (store.isLoggedIn()) nav.go('home');
+  data: {
+    loggingIn: false,
+    error: ''
   },
-  onWechatLogin() {
-    // 无后端时仅保存本地演示登录态；正式登录需把 wx.login code 交给服务端换取会话。
-    store.setLoggedIn(true);
-    const loginReturn = store.popLoginReturn();
-    if (loginReturn && loginReturn.page) {
-      if (loginReturn.mode === 'back') {
-        nav.back(loginReturn.page);
-      } else {
-        nav.redirect(loginReturn.page);
+  onLoad() {
+    if (auth.isLoggedIn()) nav.go('home');
+  },
+  async onWechatLogin() {
+    if (this.data.loggingIn) return;
+    this.setData({ loggingIn: true, error: '' });
+    try {
+      await auth.login();
+      const loginReturn = store.popLoginReturn();
+      if (loginReturn && loginReturn.page) {
+        if (loginReturn.mode === 'back') {
+          nav.back(loginReturn.page);
+        } else {
+          nav.redirect(loginReturn.page);
+        }
+        return;
       }
-      return;
+      nav.go('home');
+    } catch (error) {
+      this.setData({
+        error: error && error.message ? error.message : '微信登录失败，请稍后重试'
+      });
+    } finally {
+      this.setData({ loggingIn: false });
     }
-    nav.go('home');
   },
   onBrowseCatalog() {
-    store.setLoggedIn(false);
+    auth.logout();
     store.popLoginReturn();
     nav.go('home');
   }

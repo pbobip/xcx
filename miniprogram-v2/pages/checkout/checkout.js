@@ -1,5 +1,6 @@
 const nav = require('../../utils/nav');
 const store = require('../../utils/store');
+const auth = require('../../utils/auth');
 const { PACKAGES, getPackage, getIndexByCode, normalizeIndex } = require('../../utils/packages');
 
 Page({
@@ -32,7 +33,7 @@ Page({
   },
 
   onLoad() {
-    if (!store.isLoggedIn()) {
+    if (!auth.isLoggedIn()) {
       store.setLoginReturn({ page: 'checkout', mode: 'back' });
       nav.go('login');
       return;
@@ -115,7 +116,7 @@ Page({
   // 校验顺序与文案与原型一致（shared/app.js 211-218 行）
   onPay() {
     if (this.data.paying) return;
-    if (!store.isLoggedIn()) {
+    if (!auth.isLoggedIn()) {
       store.setLoginReturn({ page: 'checkout', mode: 'back' });
       nav.go('login');
       return;

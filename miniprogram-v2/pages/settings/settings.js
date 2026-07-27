@@ -1,5 +1,5 @@
 const nav = require('../../utils/nav');
-const store = require('../../utils/store');
+const auth = require('../../utils/auth');
 
 Page({
   data: {
@@ -30,7 +30,7 @@ Page({
     this.setData({ logoutOpen: false });
   },
   confirmLogout() {
-    store.setLoggedIn(false);
+    auth.logout();
     nav.relaunch('login');
   }
 });

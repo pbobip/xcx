@@ -9,11 +9,30 @@ function readSource(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), 'utf8');
 }
 
-function loadPage(relativePath, seed = {}) {
+function loadPage(relativePath, seed = {}, options = {}) {
   const storage = new Map(Object.entries(seed));
   const calls = [];
 
   global.wx = {
+    cloud: {
+      async callFunction(params) {
+        calls.push({ type: 'callFunction', name: params.name, data: params.data });
+        return options.cloudResponse || {
+          result: {
+            success: true,
+            data: {
+              user: {
+                id: 'users-test',
+                platformUserNo: 'BBX-TEST',
+                nickname: '微信用户',
+                avatarFileId: null
+              },
+              isFirstLogin: false
+            }
+          }
+        };
+      }
+    },
     getStorageSync(key) {
       return storage.has(key) ? storage.get(key) : '';
     },
@@ -60,7 +79,7 @@ function loadPage(relativePath, seed = {}) {
   return { page: instance, storage, calls };
 }
 
-test('游客选择套餐时先进入登录，登录后回到确认订单', () => {
+test('游客选择套餐时先进入登录，云端登录后回到确认订单', async () => {
   const detail = loadPage('pages/service-detail/service-detail.js');
 
   detail.page.onChoosePlan();
@@ -74,9 +93,19 @@ test('游客选择套餐时先进入登录，登录后回到确认订单', () =>
   const login = loadPage('pages/login/login.js', {
     bbx_login_return: detail.storage.get('bbx_login_return')
   });
-  login.page.onWechatLogin();
+  await login.page.onWechatLogin();
 
-  assert.equal(login.storage.get('bbx_logged_in'), true);
+  assert.deepEqual(login.calls.find((call) => call.type === 'callFunction'), {
+    type: 'callFunction',
+    name: 'auth',
+    data: { action: 'init', payload: {} }
+  });
+  assert.deepEqual(login.storage.get('bbx_current_user'), {
+    id: 'users-test',
+    platformUserNo: 'BBX-TEST',
+    nickname: '微信用户',
+    avatarFileId: null
+  });
   assert.equal(login.storage.has('bbx_login_return'), false);
   assert.deepEqual(login.calls.at(-1), {
     type: 'redirectTo',
@@ -94,6 +123,47 @@ test('游客直接打开确认订单页也不能绕过登录校验', () => {
     page: 'checkout',
     mode: 'back'
   });
+});
+
+test('云端登录顾客选择套餐后可以继续打开确认订单', () => {
+  const seed = {
+    bbx_current_user: {
+      id: 'users-test',
+      platformUserNo: 'BBX-TEST',
+      nickname: '微信用户',
+      avatarFileId: null
+    }
+  };
+  const detail = loadPage('pages/service-detail/service-detail.js', seed);
+
+  detail.page.onChoosePlan();
+
+  assert.equal(detail.calls.at(-1).url, '/pages/checkout/checkout');
+
+  const checkout = loadPage('pages/checkout/checkout.js', seed);
+  checkout.page.onLoad();
+
+  assert.equal(
+    checkout.calls.some((call) => call.url === '/pages/login/login'),
+    false
+  );
+});
+
+test('个人中心展示云端登录返回的平台用户资料', () => {
+  const profile = loadPage('pages/profile/profile.js', {
+    bbx_current_user: {
+      id: 'users-test',
+      platformUserNo: 'BBX-20260727-ABC123',
+      nickname: '云东',
+      avatarFileId: null
+    }
+  });
+
+  profile.page.onShow();
+
+  assert.equal(profile.page.data.loggedIn, true);
+  assert.equal(profile.page.data.user.nickname, '云东');
+  assert.equal(profile.page.data.user.platformUserNo, 'BBX-20260727-ABC123');
 });
 
 test('我的订单快捷入口会把所选状态带到订单页', () => {
