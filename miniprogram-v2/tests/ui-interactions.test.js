@@ -428,6 +428,49 @@ test('顾客订单详情加载失败后可从错误状态重试并恢复快照',
   assert.equal(detail.page.data.title, '钻石段位技术陪');
 });
 
+test('顾客可在订单详情看到云端返回的操作记录消息', async () => {
+  const detail = loadPage('pages/order-detail/order-detail.js', {
+    bbx_current_user: {
+      id: 'users-test',
+      platformUserNo: 'BBX-TEST',
+      nickname: '微信用户',
+      avatarFileId: null
+    }
+  }, {
+    cloudResponse: {
+      result: {
+        success: true,
+        data: {
+          order: {
+            id: 'order-1',
+            orderNo: 'BBX-TEST-001',
+            paymentStatus: 'UNPAID',
+            fulfillmentStatus: 'NOT_STARTED',
+            afterSalesStatus: 'NONE',
+            version: 1,
+            snapshot: {
+              service: { name: '匹配 / 下三 / 黄金', unitLabel: '局' },
+              pricing: { quantity: 2, payableAmountCents: 2000 }
+            }
+          },
+          timeline: [{
+            action: 'CREATE',
+            message: '服务订单已创建，等待付款',
+            createdAt: '2026-07-27T18:27:34.098Z'
+          }]
+        }
+      }
+    }
+  });
+
+  await detail.page.onLoad({ orderNo: 'BBX-TEST-001' });
+
+  assert.deepEqual(detail.page.data.timeline, [{
+    customerMessage: '服务订单已创建，等待付款',
+    createdAt: '2026-07-27T18:27:34.098Z'
+  }]);
+});
+
 test('首页云端推荐卡打开与卡片文案一致的技术陪套餐', async () => {
   const service = {
     id: 'service-val-pro',

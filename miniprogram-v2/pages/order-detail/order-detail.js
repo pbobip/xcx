@@ -93,7 +93,10 @@ Page({
         statusTitle: statusTitle(order),
         progressIndex: progressIndex(order),
         actions: availableActions(order),
-        timeline: res.result.data.timeline || [],
+        timeline: (res.result.data.timeline || []).map((item) => ({
+          customerMessage: item.message,
+          createdAt: item.createdAt
+        })),
         orderNo: order.orderNo,
         title: service.name || '',
         quantity: pricing.quantity || order.quantity || 1,
