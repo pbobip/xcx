@@ -119,6 +119,14 @@ function validateOrderValues(service, input) {
 }
 
 function snapshotFor(service, quote, orderValues) {
+  const pricing = {
+    quantity: quote.quantity,
+    unitPriceCents: quote.unitPriceCents,
+    originalAmountCents: quote.originalAmountCents,
+    discountAmountCents: quote.discountAmountCents,
+    payableAmountCents: quote.payableAmountCents
+  };
+  if (quote.coupon) pricing.coupon = quote.coupon;
   return {
     service: {
       id: service._id,
@@ -131,13 +139,7 @@ function snapshotFor(service, quote, orderValues) {
       unitLabel: service.unitLabel,
       descriptionBlocks: service.descriptionBlocks || []
     },
-    pricing: {
-      quantity: quote.quantity,
-      unitPriceCents: quote.unitPriceCents,
-      originalAmountCents: quote.originalAmountCents,
-      discountAmountCents: quote.discountAmountCents,
-      payableAmountCents: quote.payableAmountCents
-    },
+    pricing,
     orderFields: service.orderFields || [],
     orderValues,
     fulfillmentStandard: service.fulfillmentStandard || '',
@@ -168,12 +170,14 @@ function stableStringify(value) {
   return JSON.stringify(value);
 }
 
-function requestHash(serviceId, quantity, orderValues) {
-  return crypto.createHash('sha256').update(stableStringify({
+function requestHash(serviceId, quantity, orderValues, userCouponId) {
+  const request = {
     serviceId,
     quantity,
     orderValues
-  })).digest('hex');
+  };
+  if (userCouponId) request.userCouponId = userCouponId;
+  return crypto.createHash('sha256').update(stableStringify(request)).digest('hex');
 }
 
 function publicOrder(record) {
@@ -186,6 +190,7 @@ function publicOrder(record) {
     originalAmountCents: record.originalAmountCents,
     discountAmountCents: record.discountAmountCents,
     payableAmountCents: record.payableAmountCents,
+    userCouponId: record.userCouponId || null,
     paidAmountCents: record.paidAmountCents,
     paymentStatus: record.paymentStatus,
     fulfillmentStatus: record.fulfillmentStatus,
@@ -195,6 +200,275 @@ function publicOrder(record) {
     createdAt: record.createdAt,
     version: record.version,
     snapshot: record.snapshot
+  };
+}
+
+function publicCouponTemplate(template) {
+  const result = {
+    id: template._id,
+    code: template.code,
+    name: template.name,
+    type: template.type,
+    discountCents: template.discountCents,
+    thresholdCents: template.thresholdCents || 0,
+    gameIds: template.gameIds || [],
+    categoryIds: template.categoryIds || [],
+    serviceIds: template.serviceIds || []
+  };
+  if (template.validFrom) result.validFrom = template.validFrom;
+  if (template.validTo) result.validTo = template.validTo;
+  return result;
+}
+
+function couponValidity(record, template) {
+  const fromTimes = [record.validFrom, template && template.validFrom]
+    .filter(Boolean)
+    .map((value) => new Date(value).getTime());
+  const toTimes = [record.validTo, template && template.validTo]
+    .filter(Boolean)
+    .map((value) => new Date(value).getTime());
+  const invalid = fromTimes.some((value) => Number.isNaN(value))
+    || toTimes.some((value) => Number.isNaN(value));
+  return {
+    invalid,
+    validFrom: !invalid && fromTimes.length ? new Date(Math.max(...fromTimes)) : null,
+    validTo: !invalid && toTimes.length ? new Date(Math.min(...toTimes)) : null
+  };
+}
+
+function publicCustomerCoupon(record, template, status = record.status) {
+  const validity = couponValidity(record, template);
+  return {
+    id: record._id,
+    status,
+    validFrom: validity.validFrom,
+    validTo: validity.validTo,
+    lockedOrderId: record.lockedOrderId || null,
+    usedOrderId: record.usedOrderId || null,
+    template: publicCouponTemplate(template)
+  };
+}
+
+function couponLifecycle(record, template, timestamp) {
+  const statusReasons = {
+    LOCKED: '优惠券已被其他订单占用',
+    USED: '优惠券已使用',
+    EXPIRED: '优惠券已过期',
+    VOID: '优惠券已作废'
+  };
+  if (record.status !== 'AVAILABLE') {
+    return {
+      status: record.status,
+      available: false,
+      reason: statusReasons[record.status] || '优惠券当前不可用',
+      validity: couponValidity(record, template)
+    };
+  }
+  if (!template || template.status !== 'ACTIVE') {
+    return {
+      status: 'VOID',
+      available: false,
+      reason: '优惠券活动已停用',
+      validity: couponValidity(record, template)
+    };
+  }
+
+  const validity = couponValidity(record, template);
+  if (validity.invalid) {
+    return { status: 'VOID', available: false, reason: '优惠券有效期配置无效', validity };
+  }
+  const nowTime = timestamp.getTime();
+  if (validity.validFrom && nowTime < validity.validFrom.getTime()) {
+    return { status: 'AVAILABLE', available: false, reason: '优惠券尚未生效', validity };
+  }
+  if (validity.validTo && nowTime > validity.validTo.getTime()) {
+    return { status: 'EXPIRED', available: false, reason: '优惠券已过期', validity };
+  }
+  return { status: 'AVAILABLE', available: true, reason: '', validity };
+}
+
+function evaluateCoupon(record, template, service, originalAmountCents, timestamp) {
+  const lifecycle = couponLifecycle(record, template, timestamp);
+  if (!lifecycle.available) return { available: false, reason: lifecycle.reason };
+
+  const serviceIds = template.serviceIds || [];
+  const gameIds = template.gameIds || [];
+  const categoryIds = template.categoryIds || [];
+  const categoryMatches = categoryIds.length === 0
+    || categoryIds.some((id) => (service.categoryIds || []).includes(id));
+  if ((serviceIds.length && !serviceIds.includes(service._id))
+    || (gameIds.length && !gameIds.includes(service.gameId))
+    || !categoryMatches) {
+    return { available: false, reason: '不适用于当前服务套餐' };
+  }
+
+  if (!['FIXED', 'THRESHOLD'].includes(template.type)) {
+    return { available: false, reason: '优惠券类型配置无效' };
+  }
+  const configuredThreshold = Number(template.thresholdCents || 0);
+  if (!Number.isSafeInteger(configuredThreshold) || configuredThreshold < 0) {
+    return { available: false, reason: '优惠券门槛配置无效' };
+  }
+  const thresholdCents = template.type === 'THRESHOLD' ? configuredThreshold : 0;
+  if (originalAmountCents < thresholdCents) {
+    return { available: false, reason: `订单金额未满 ${thresholdCents / 100} 元` };
+  }
+  const configuredDiscount = Number(template.discountCents);
+  if (!Number.isSafeInteger(configuredDiscount) || configuredDiscount <= 0) {
+    return { available: false, reason: '优惠券金额配置无效' };
+  }
+  const discountAmountCents = Math.min(configuredDiscount, originalAmountCents);
+  return {
+    available: true,
+    reason: '',
+    discountAmountCents,
+    payableAmountCents: originalAmountCents - discountAmountCents
+  };
+}
+
+async function quoteWithCoupon({ database, user, service, quote, userCouponId, timestamp, requestId }) {
+  const couponResult = await database.collection('user_coupons').doc(userCouponId).get();
+  const coupon = couponResult.data;
+  if (!coupon || coupon.userId !== user._id) {
+    return { failure: failure('COUPON_NOT_APPLICABLE', '优惠券不可用', requestId) };
+  }
+  const templateResult = await database.collection('coupon_templates').doc(coupon.templateId).get();
+  const template = templateResult.data;
+  if (!template) {
+    return { failure: failure('COUPON_NOT_APPLICABLE', '优惠券配置不存在', requestId) };
+  }
+  const evaluation = evaluateCoupon(
+    coupon,
+    template,
+    service,
+    quote.originalAmountCents,
+    timestamp
+  );
+  if (!evaluation.available) {
+    const code = ['LOCKED', 'USED'].includes(coupon.status)
+      ? 'COUPON_ALREADY_USED'
+      : 'COUPON_NOT_APPLICABLE';
+    return { failure: failure(code, evaluation.reason, requestId) };
+  }
+  return {
+    quote: Object.assign({}, quote, {
+      userCouponId: coupon._id,
+      coupon: publicCouponTemplate(template),
+      discountAmountCents: evaluation.discountAmountCents,
+      payableAmountCents: evaluation.payableAmountCents
+    }),
+    coupon,
+    template
+  };
+}
+
+async function handleCouponMineList({ db, user, payload, requestId, now }) {
+  const statusMap = {
+    unused: ['AVAILABLE', 'LOCKED'],
+    used: ['USED'],
+    expired: ['EXPIRED', 'VOID']
+  };
+  const statuses = statusMap[payload.status || 'unused'];
+  if (!statuses) return failure('INVALID_ARGUMENT', '优惠券状态无效', requestId);
+
+  const limit = Math.max(1, Math.min(Number(payload.limit) || 20, 50));
+  const result = await db.collection('user_coupons')
+    .where({ userId: user._id })
+    .get();
+  const timestamp = now();
+  let records = [];
+  for (const record of result.data) {
+    const templateResult = await db.collection('coupon_templates').doc(record.templateId).get();
+    const template = templateResult.data;
+    if (!template) continue;
+    const lifecycle = couponLifecycle(record, template, timestamp);
+    if (statuses.includes(lifecycle.status)) records.push({ record, template, lifecycle });
+  }
+  records.sort((left, right) => {
+    const leftTime = left.lifecycle.validity.validTo
+      ? left.lifecycle.validity.validTo.getTime()
+      : 0;
+    const rightTime = right.lifecycle.validity.validTo
+      ? right.lifecycle.validity.validTo.getTime()
+      : 0;
+    if (leftTime !== rightTime) return rightTime - leftTime;
+    return String(left.record._id).localeCompare(String(right.record._id));
+  });
+  if (payload.cursor) {
+    const index = records.findIndex((item) => item.record._id === payload.cursor);
+    if (index === -1) return failure('INVALID_ARGUMENT', '优惠券分页游标无效', requestId);
+    records = records.slice(index + 1);
+  }
+  const hasMore = records.length > limit;
+  records = records.slice(0, limit);
+
+  const coupons = records.map(({ record, template, lifecycle }) => Object.assign(
+    publicCustomerCoupon(record, template, lifecycle.status),
+    { available: lifecycle.available, unavailableReason: lifecycle.reason }
+  ));
+
+  return {
+    success: true,
+    data: {
+      coupons,
+      nextCursor: hasMore && records.length ? records[records.length - 1].record._id : null
+    },
+    requestId
+  };
+}
+
+async function handleCouponAvailableList({ db, _, user, payload, requestId, now }) {
+  const service = await activeService(db, payload.serviceId);
+  if (!service || service.status === 'OFFLINE' || service.status === 'DRAFT') {
+    return failure('SERVICE_OFFLINE', '服务套餐不存在或已下架', requestId);
+  }
+  if (service.status !== 'ACTIVE') {
+    return failure('SERVICE_PAUSED', '服务套餐当前暂停接单', requestId);
+  }
+  const quantity = validateQuantity(service, payload.quantity);
+  if (quantity === null) {
+    return failure('INVALID_ARGUMENT', '购买数量超出套餐允许范围', requestId);
+  }
+  const quote = quoteFor(service, quantity);
+  if (!quote) return failure('INVALID_ARGUMENT', '套餐价格配置无效', requestId);
+
+  const result = await db.collection('user_coupons').where({
+    userId: user._id,
+    status: _.in(['AVAILABLE', 'LOCKED', 'EXPIRED', 'VOID'])
+  }).orderBy('validTo', 'asc').get();
+  const timestamp = now();
+  const coupons = [];
+  for (const record of result.data) {
+    const templateResult = await db.collection('coupon_templates').doc(record.templateId).get();
+    const template = templateResult.data;
+    if (!template) continue;
+    const evaluation = evaluateCoupon(
+      record,
+      template,
+      service,
+      quote.originalAmountCents,
+      timestamp
+    );
+    coupons.push(Object.assign(publicCustomerCoupon(record, template), {
+      available: evaluation.available,
+      unavailableReason: evaluation.reason,
+      discountAmountCents: evaluation.discountAmountCents || 0,
+      payableAmountCents: evaluation.available
+        ? evaluation.payableAmountCents
+        : quote.originalAmountCents
+    }));
+  }
+  coupons.sort((left, right) => Number(right.available) - Number(left.available));
+
+  return {
+    success: true,
+    data: {
+      serviceId: service._id,
+      quantity,
+      originalAmountCents: quote.originalAmountCents,
+      coupons
+    },
+    requestId
   };
 }
 
@@ -209,7 +483,8 @@ async function handleQuoteAndCreate({ db, user, event, payload, requestId, now, 
       Number(payload.quantity),
       payload.orderValues && typeof payload.orderValues === 'object'
         ? payload.orderValues
-        : {}
+        : {},
+      payload.userCouponId || null
     );
     const existingResult = await db.collection('orders')
       .where({ userId: user._id, idempotencyKey: event.idempotencyKey })
@@ -239,10 +514,23 @@ async function handleQuoteAndCreate({ db, user, event, payload, requestId, now, 
   if (quantity === null) {
     return failure('INVALID_ARGUMENT', '购买数量超出套餐允许范围', requestId);
   }
-  const quote = quoteFor(service, quantity);
+  let quote = quoteFor(service, quantity);
   if (!quote) return failure('INVALID_ARGUMENT', '套餐价格配置无效', requestId);
 
   if (event.action === 'quote') {
+    if (payload.userCouponId) {
+      const selected = await quoteWithCoupon({
+        database: db,
+        user,
+        service,
+        quote,
+        userCouponId: payload.userCouponId,
+        timestamp: now(),
+        requestId
+      });
+      if (selected.failure) return selected.failure;
+      quote = selected.quote;
+    }
     return { success: true, data: { quote }, requestId };
   }
   const validated = validateOrderValues(service, payload.orderValues);
@@ -253,20 +541,19 @@ async function handleQuoteAndCreate({ db, user, event, payload, requestId, now, 
 
   const timestamp = now();
   const orderValues = validated.values;
-  const snapshot = snapshotFor(service, quote, orderValues);
-  const record = {
+  const recordFor = (finalQuote) => ({
     orderNo: createOrderNo(timestamp),
     userId: user._id,
     serviceId: service._id,
-    snapshot,
+    snapshot: snapshotFor(service, finalQuote, orderValues),
     quantity,
-    unitPriceCents: quote.unitPriceCents,
-    originalAmountCents: quote.originalAmountCents,
-    discountAmountCents: 0,
-    payableAmountCents: quote.payableAmountCents,
+    unitPriceCents: finalQuote.unitPriceCents,
+    originalAmountCents: finalQuote.originalAmountCents,
+    discountAmountCents: finalQuote.discountAmountCents,
+    payableAmountCents: finalQuote.payableAmountCents,
     paidAmountCents: 0,
     refundedAmountCents: 0,
-    userCouponId: null,
+    userCouponId: finalQuote.userCouponId || null,
     orderValues,
     serviceMode: orderValues.serviceMode,
     scheduledAt: orderValues.serviceMode === 'RESERVATION'
@@ -287,7 +574,7 @@ async function handleQuoteAndCreate({ db, user, event, payload, requestId, now, 
     updatedAt: timestamp,
     version: 1,
     isTest: service.isTest === true
-  };
+  });
 
   const outcome = await db.runTransaction(async (transaction) => {
     const orders = transaction.collection('orders');
@@ -301,8 +588,33 @@ async function handleQuoteAndCreate({ db, user, event, payload, requestId, now, 
       return { order: publicOrder(existing), reused: true };
     }
 
+    let finalQuote = quote;
+    if (payload.userCouponId) {
+      const selected = await quoteWithCoupon({
+        database: transaction,
+        user,
+        service,
+        quote: quoteFor(service, quantity),
+        userCouponId: payload.userCouponId,
+        timestamp,
+        requestId
+      });
+      if (selected.failure) return { failure: selected.failure };
+      finalQuote = selected.quote;
+    }
+    const record = recordFor(finalQuote);
     const created = await orders.add({ data: record });
     const saved = Object.assign({ _id: created._id }, record);
+    if (finalQuote.userCouponId) {
+      await transaction.collection('user_coupons').doc(finalQuote.userCouponId).update({
+        data: {
+          status: 'LOCKED',
+          lockedOrderId: created._id,
+          lockedAt: timestamp,
+          updatedAt: timestamp
+        }
+      });
+    }
     await transaction.collection('order_logs').add({
       data: {
         orderId: created._id,
@@ -329,6 +641,7 @@ async function handleQuoteAndCreate({ db, user, event, payload, requestId, now, 
   if (outcome.conflict) {
     return failure('DUPLICATE_REQUEST', '重复提交内容与原请求不一致', requestId);
   }
+  if (outcome.failure) return outcome.failure;
   return {
     success: true,
     data: { order: outcome.order, reused: outcome.reused },
@@ -464,6 +777,32 @@ async function handleCancel({ db, user, payload, requestId, now }) {
     if (record.version !== version) return failure('CONFLICT', '订单状态已更新，请刷新后重试', requestId);
     if (record.paymentStatus !== 'UNPAID' || record.fulfillmentStatus !== 'NOT_STARTED') {
       return failure('PAYMENT_STATUS_CONFLICT', '订单当前状态不允许取消', requestId);
+    }
+
+    if (record.userCouponId) {
+      const userCoupons = transaction.collection('user_coupons');
+      const couponResult = await userCoupons.doc(record.userCouponId).get();
+      const coupon = couponResult.data;
+      if (coupon && coupon.userId === user._id
+        && coupon.status === 'LOCKED' && coupon.lockedOrderId === orderId) {
+        const templateResult = await transaction.collection('coupon_templates')
+          .doc(coupon.templateId)
+          .get();
+        const template = templateResult.data;
+        const status = couponLifecycle(
+          Object.assign({}, coupon, { status: 'AVAILABLE' }),
+          template,
+          timestamp
+        ).status;
+        await userCoupons.doc(record.userCouponId).update({
+          data: {
+            status,
+            lockedOrderId: null,
+            lockedAt: null,
+            updatedAt: timestamp
+          }
+        });
+      }
     }
 
     await orders.doc(orderId).update({
@@ -611,6 +950,8 @@ function createOrderHandler({
       };
 
       const ACTIONS = {
+        'coupon.mine.list': handleCouponMineList,
+        'coupon.available.list': handleCouponAvailableList,
         quote: handleQuoteAndCreate,
         create: handleQuoteAndCreate,
         summary: handleSummary,

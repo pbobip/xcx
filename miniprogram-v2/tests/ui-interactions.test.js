@@ -255,6 +255,145 @@ test('访客不能绕过订单、优惠券和投诉等顾客资料页登录门�
   }
 });
 
+test('顾客在我的优惠券页按状态查看云端券规则', async () => {
+  const coupons = loadPage('pages/coupons/coupons.js', {
+    bbx_current_user: {
+      id: 'users-test',
+      platformUserNo: 'BBX-TEST',
+      nickname: '微信用户',
+      avatarFileId: null
+    }
+  }, {
+    cloudCall: async ({ data }) => {
+      assert.equal(data.action, 'coupon.mine.list');
+      assert.equal(data.payload.status, 'unused');
+      return {
+        result: {
+          success: true,
+          data: {
+            coupons: [
+              {
+                id: 'coupon-newcomer',
+                status: 'AVAILABLE',
+                validFrom: '2026-07-01T00:00:00.000Z',
+                validTo: '2026-08-31T23:59:59.000Z',
+                template: {
+                  id: 'template-newcomer',
+                  code: 'NEWCOMER_10',
+                  name: '新人立减 10 元',
+                  type: 'FIXED',
+                  discountCents: 1000,
+                  thresholdCents: 0,
+                  gameIds: [],
+                  categoryIds: [],
+                  serviceIds: []
+                }
+              },
+              {
+                id: 'coupon-future',
+                status: 'AVAILABLE',
+                available: false,
+                unavailableReason: '优惠券尚未生效',
+                validFrom: '2026-08-01T00:00:00.000Z',
+                validTo: '2026-08-31T23:59:59.000Z',
+                template: {
+                  name: '八月活动券',
+                  type: 'FIXED',
+                  discountCents: 500,
+                  thresholdCents: 0,
+                  gameIds: [],
+                  categoryIds: [],
+                  serviceIds: []
+                }
+              }
+            ],
+            nextCursor: null
+          }
+        }
+      };
+    }
+  });
+
+  await coupons.page.onShow();
+
+  assert.deepEqual(coupons.page.data.coupons[0], {
+    id: 'coupon-newcomer',
+    name: '新人立减 10 元',
+    amountText: '¥10',
+    thresholdText: '无门槛',
+    scopeText: '全部服务套餐',
+    validText: '2026-07-01 至 2026-08-31',
+    statusText: '可使用'
+  });
+  assert.equal(coupons.page.data.coupons[1].statusText, '优惠券尚未生效');
+  assert.match(readSource('pages/coupons/coupons.wxml'), /coupon\.amountText/);
+});
+
+test('顾客切换优惠券标签失败时不会看到上一标签数据并可重新加载', async () => {
+  let usedAttempts = 0;
+  const coupons = loadPage('pages/coupons/coupons.js', {
+    bbx_current_user: {
+      id: 'users-test',
+      platformUserNo: 'BBX-TEST',
+      nickname: '微信用户',
+      avatarFileId: null
+    }
+  }, {
+    cloudCall: async ({ data }) => {
+      const status = data.payload.status;
+      if (status === 'used' && usedAttempts++ === 0) {
+        return {
+          result: {
+            success: false,
+            error: { code: 'INTERNAL_ERROR', message: '网络繁忙，请稍后重试' }
+          }
+        };
+      }
+      const records = {
+        unused: [{
+          id: 'coupon-unused', status: 'AVAILABLE',
+          validFrom: '2026-07-01T00:00:00.000Z',
+          validTo: '2026-08-31T23:59:59.000Z',
+          template: {
+            name: '未使用券', type: 'FIXED', discountCents: 500,
+            thresholdCents: 0, gameIds: [], categoryIds: [], serviceIds: []
+          }
+        }],
+        used: [{
+          id: 'coupon-used', status: 'USED',
+          validFrom: '2026-06-01T00:00:00.000Z',
+          validTo: '2026-07-31T23:59:59.000Z',
+          template: {
+            name: '已使用券', type: 'THRESHOLD', discountCents: 1000,
+            thresholdCents: 5000, gameIds: [], categoryIds: [], serviceIds: []
+          }
+        }]
+      };
+      return {
+        result: {
+          success: true,
+          data: { coupons: records[status] || [], nextCursor: null }
+        }
+      };
+    }
+  });
+
+  await coupons.page.onShow();
+  assert.equal(coupons.page.data.coupons[0].id, 'coupon-unused');
+
+  await coupons.page.onTabTap({ currentTarget: { dataset: { index: 1 } } });
+
+  assert.equal(coupons.page.data.activeTab, 1);
+  assert.deepEqual(coupons.page.data.coupons, []);
+  assert.match(coupons.page.data.error, /网络繁忙/);
+
+  await coupons.page.retry();
+
+  assert.equal(coupons.page.data.error, '');
+  assert.equal(coupons.page.data.coupons[0].id, 'coupon-used');
+  assert.equal(coupons.page.data.coupons[0].statusText, '已使用');
+});
+
 test('个人中心展示云端登录返回的平台用户资料', () => {
   const profile = loadPage('pages/profile/profile.js', {
     bbx_current_user: {

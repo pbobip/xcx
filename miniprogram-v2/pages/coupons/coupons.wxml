@@ -8,11 +8,44 @@
       data-index="{{index}}"
       bindtap="onTabTap">{{item}}</view>
   </view>
-  <view class="empty card">
+
+  <view class="loading-hint" wx:if="{{loading && coupons.length === 0}}">
+    <text class="muted">加载中…</text>
+  </view>
+
+  <view class="empty card" wx:if="{{error && !loading && coupons.length === 0}}">
     <view>
       <view class="empty-mark"><view class="icon i-coupon"></view></view>
-      <view class="h2">暂无可用优惠券</view>
-      <view class="p">当前价目按爆爆熊电竞公示价格结算，有活动时会在这里展示。</view>
+      <view class="h2">优惠券暂时无法加载</view>
+      <view class="p">{{error}}</view>
+      <button class="btn btn-secondary state-button" bindtap="retry">重新加载</button>
+    </view>
+  </view>
+
+  <view wx:if="{{coupons.length > 0}}">
+    <view class="coupon-card card" wx:for="{{coupons}}" wx:for-item="coupon" wx:key="id">
+      <view class="coupon-value">
+        <text class="coupon-amount">{{coupon.amountText}}</text>
+        <text class="coupon-threshold">{{coupon.thresholdText}}</text>
+      </view>
+      <view class="coupon-copy">
+        <view class="row between">
+          <text class="h3">{{coupon.name}}</text>
+          <text class="tag">{{coupon.statusText}}</text>
+        </view>
+        <text class="p">{{coupon.scopeText}}</text>
+        <text class="p muted">有效期：{{coupon.validText}}</text>
+      </view>
+    </view>
+    <view class="loading-hint" wx:if="{{loading}}"><text class="muted">加载更多…</text></view>
+    <button class="btn btn-secondary load-more" wx:if="{{nextCursor && !loading}}" bindtap="loadMore">加载更多</button>
+  </view>
+
+  <view class="empty card" wx:if="{{empty && !loading && !error}}">
+    <view>
+      <view class="empty-mark"><view class="icon i-coupon"></view></view>
+      <view class="h2">当前分类暂无优惠券</view>
+      <view class="p">有活动时会在这里展示，结算金额以服务端计算结果为准。</view>
       <view class="btn btn-primary" hover-class="btn-hover" style="margin-top:36rpx" bindtap="onViewCatalog">查看价目单</view>
     </view>
   </view>

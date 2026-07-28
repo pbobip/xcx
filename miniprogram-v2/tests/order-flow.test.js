@@ -162,6 +162,572 @@ function validCreatePayload(overrides = {}) {
   }, overrides);
 }
 
+function couponTemplate(overrides = {}) {
+  return Object.assign({
+    _id: 'template-threshold',
+    code: 'OVER_50_MINUS_10',
+    name: '满 50 减 10 元',
+    type: 'THRESHOLD',
+    discountCents: 1000,
+    thresholdCents: 5000,
+    gameIds: [],
+    categoryIds: [],
+    serviceIds: [],
+    validFrom: new Date('2026-07-01T00:00:00.000Z'),
+    validTo: new Date('2026-08-31T23:59:59.000Z'),
+    status: 'ACTIVE'
+  }, overrides);
+}
+
+function customerCoupon(id, template, overrides = {}) {
+  return Object.assign({
+    _id: id,
+    userId: 'user-a',
+    templateId: template._id,
+    status: 'AVAILABLE',
+    validFrom: template.validFrom,
+    validTo: template.validTo
+  }, overrides);
+}
+
+function createCouponOrderFixture(options = {}) {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const template = options.template || couponTemplate();
+  const coupons = options.coupons || [customerCoupon('coupon-own', template)];
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    services: [service({ orderFields: requiredOrderFields() })],
+    coupon_templates: [template],
+    user_coupons: coupons,
+    orders: [],
+    order_logs: []
+  });
+  let orderSequence = 0;
+  const main = createOrderHandler({
+    cloud,
+    now: options.now || (() => new Date('2026-07-28T00:00:00.000Z')),
+    createOrderNo: () => `BBX-COUPON-${++orderSequence}`
+  });
+  return { cloud, main, template };
+}
+
+test('顾客只能查看自己的未使用优惠券并获得模板快照', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    coupon_templates: [{
+      _id: 'template-newcomer',
+      code: 'NEWCOMER_10',
+      name: '新人立减 10 元',
+      type: 'FIXED',
+      discountCents: 1000,
+      thresholdCents: 0,
+      gameIds: [],
+      categoryIds: [],
+      serviceIds: [],
+      status: 'ACTIVE'
+    }],
+    user_coupons: [
+      {
+        _id: 'coupon-a',
+        userId: 'user-a',
+        templateId: 'template-newcomer',
+        status: 'AVAILABLE',
+        validFrom: new Date('2026-07-01T00:00:00.000Z'),
+        validTo: new Date('2026-08-01T00:00:00.000Z')
+      },
+      {
+        _id: 'coupon-b',
+        userId: 'user-b',
+        templateId: 'template-newcomer',
+        status: 'AVAILABLE',
+        validFrom: new Date('2026-07-01T00:00:00.000Z'),
+        validTo: new Date('2026-08-01T00:00:00.000Z')
+      }
+    ]
+  });
+  const main = createOrderHandler({
+    cloud,
+    now: () => new Date('2026-07-28T00:00:00.000Z')
+  });
+
+  const result = await main({
+    action: 'coupon.mine.list',
+    payload: { status: 'unused', limit: 10 }
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data.coupons.length, 1);
+  assert.equal(result.data.coupons[0].id, 'coupon-a');
+  assert.deepEqual(result.data.coupons[0].template, {
+    id: 'template-newcomer',
+    code: 'NEWCOMER_10',
+    name: '新人立减 10 元',
+    type: 'FIXED',
+    discountCents: 1000,
+    thresholdCents: 0,
+    gameIds: [],
+    categoryIds: [],
+    serviceIds: []
+  });
+  assert.equal(result.data.nextCursor, null);
+});
+
+test('我的优惠券按未使用已使用和已过期分类', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const template = couponTemplate({ type: 'FIXED', thresholdCents: 0 });
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    coupon_templates: [template],
+    user_coupons: [
+      customerCoupon('coupon-unused', template),
+      customerCoupon('coupon-used', template, { status: 'USED' }),
+      customerCoupon('coupon-expired', template, {
+        validFrom: new Date('2026-06-01T00:00:00.000Z'),
+        validTo: new Date('2026-07-01T00:00:00.000Z')
+      })
+    ]
+  });
+  const main = createOrderHandler({
+    cloud,
+    now: () => new Date('2026-07-28T00:00:00.000Z')
+  });
+
+  const unused = await main({
+    action: 'coupon.mine.list',
+    payload: { status: 'unused' }
+  });
+  const used = await main({
+    action: 'coupon.mine.list',
+    payload: { status: 'used' }
+  });
+  const expired = await main({
+    action: 'coupon.mine.list',
+    payload: { status: 'expired' }
+  });
+
+  assert.deepEqual(unused.data.coupons.map((item) => item.id), ['coupon-unused']);
+  assert.deepEqual(used.data.coupons.map((item) => item.id), ['coupon-used']);
+  assert.deepEqual(expired.data.coupons.map((item) => item.id), ['coupon-expired']);
+});
+
+test('尚未生效优惠券在未使用分类中显示不可用原因', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const template = couponTemplate({
+    validFrom: new Date('2026-07-10T00:00:00.000Z'),
+    validTo: new Date('2026-08-15T23:59:59.000Z')
+  });
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    coupon_templates: [template],
+    user_coupons: [customerCoupon('coupon-future', template, {
+      validFrom: new Date('2026-07-20T00:00:00.000Z'),
+      validTo: new Date('2026-08-31T23:59:59.000Z')
+    })]
+  });
+  const main = createOrderHandler({
+    cloud,
+    now: () => new Date('2026-07-15T00:00:00.000Z')
+  });
+
+  const result = await main({
+    action: 'coupon.mine.list',
+    payload: { status: 'unused' }
+  });
+
+  assert.equal(result.success, true);
+  assert.deepEqual({
+    status: result.data.coupons[0].status,
+    available: result.data.coupons[0].available,
+    unavailableReason: result.data.coupons[0].unavailableReason
+  }, {
+    status: 'AVAILABLE',
+    available: false,
+    unavailableReason: '优惠券尚未生效'
+  });
+});
+
+test('优惠券展示有效期采用模板与顾客券期限的交集', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const template = couponTemplate({
+    validFrom: new Date('2026-07-10T00:00:00.000Z'),
+    validTo: new Date('2026-08-15T23:59:59.000Z')
+  });
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    coupon_templates: [template],
+    user_coupons: [customerCoupon('coupon-range', template, {
+      validFrom: new Date('2026-07-20T00:00:00.000Z'),
+      validTo: new Date('2026-08-31T23:59:59.000Z')
+    })]
+  });
+  const main = createOrderHandler({
+    cloud,
+    now: () => new Date('2026-07-28T00:00:00.000Z')
+  });
+
+  const result = await main({
+    action: 'coupon.mine.list',
+    payload: { status: 'unused' }
+  });
+
+  assert.deepEqual({
+    validFrom: result.data.coupons[0].validFrom,
+    validTo: result.data.coupons[0].validTo
+  }, {
+    validFrom: new Date('2026-07-20T00:00:00.000Z'),
+    validTo: new Date('2026-08-15T23:59:59.000Z')
+  });
+});
+
+test('顾客查看当前套餐优惠券时同时得到可用结果和不可用原因', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const commonTemplate = {
+    type: 'FIXED',
+    discountCents: 1000,
+    thresholdCents: 0,
+    gameIds: [],
+    categoryIds: [],
+    serviceIds: [],
+    validFrom: new Date('2026-07-01T00:00:00.000Z'),
+    validTo: new Date('2026-08-31T23:59:59.000Z'),
+    status: 'ACTIVE'
+  };
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    services: [service()],
+    coupon_templates: [
+      Object.assign({ _id: 'template-all', code: 'ALL_10', name: '全场立减 10 元' }, commonTemplate),
+      Object.assign({
+        _id: 'template-other-service',
+        code: 'OTHER_10',
+        name: '指定套餐立减 10 元'
+      }, commonTemplate, { serviceIds: ['service-other'] })
+    ],
+    user_coupons: [
+      {
+        _id: 'coupon-available', userId: 'user-a', templateId: 'template-all',
+        status: 'AVAILABLE', validFrom: new Date('2026-07-01T00:00:00.000Z'),
+        validTo: new Date('2026-08-31T23:59:59.000Z')
+      },
+      {
+        _id: 'coupon-wrong-service', userId: 'user-a', templateId: 'template-other-service',
+        status: 'AVAILABLE', validFrom: new Date('2026-07-01T00:00:00.000Z'),
+        validTo: new Date('2026-08-31T23:59:59.000Z')
+      },
+      {
+        _id: 'coupon-expired', userId: 'user-a', templateId: 'template-all',
+        status: 'AVAILABLE', validFrom: new Date('2026-07-01T00:00:00.000Z'),
+        validTo: new Date('2026-07-20T23:59:59.000Z')
+      }
+    ]
+  });
+  const main = createOrderHandler({
+    cloud,
+    now: () => new Date('2026-07-28T00:00:00.000Z')
+  });
+
+  const result = await main({
+    action: 'coupon.available.list',
+    payload: { serviceId: 'service-val-pro', quantity: 1 }
+  });
+
+  assert.equal(result.success, true);
+  const coupons = Object.fromEntries(result.data.coupons.map((item) => [item.id, item]));
+  assert.deepEqual({
+    available: coupons['coupon-available'].available,
+    discountAmountCents: coupons['coupon-available'].discountAmountCents,
+    payableAmountCents: coupons['coupon-available'].payableAmountCents
+  }, {
+    available: true,
+    discountAmountCents: 1000,
+    payableAmountCents: 2500
+  });
+  assert.equal(coupons['coupon-wrong-service'].unavailableReason, '不适用于当前服务套餐');
+  assert.equal(coupons['coupon-expired'].unavailableReason, '优惠券已过期');
+});
+
+test('顾客选择满减券后由服务端校验门槛并计算优惠报价', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    services: [service()],
+    coupon_templates: [{
+      _id: 'template-threshold',
+      code: 'OVER_50_MINUS_10',
+      name: '满 50 减 10 元',
+      type: 'THRESHOLD',
+      discountCents: 1000,
+      thresholdCents: 5000,
+      gameIds: ['game-valorant'],
+      categoryIds: [],
+      serviceIds: [],
+      validFrom: new Date('2026-07-01T00:00:00.000Z'),
+      validTo: new Date('2026-08-31T23:59:59.000Z'),
+      status: 'ACTIVE'
+    }],
+    user_coupons: [{
+      _id: 'coupon-threshold',
+      userId: 'user-a',
+      templateId: 'template-threshold',
+      status: 'AVAILABLE',
+      validFrom: new Date('2026-07-01T00:00:00.000Z'),
+      validTo: new Date('2026-08-31T23:59:59.000Z')
+    }]
+  });
+  const main = createOrderHandler({
+    cloud,
+    now: () => new Date('2026-07-28T00:00:00.000Z')
+  });
+
+  const result = await main({
+    action: 'quote',
+    payload: {
+      serviceId: 'service-val-pro',
+      quantity: 2,
+      userCouponId: 'coupon-threshold'
+    }
+  });
+
+  assert.equal(result.success, true);
+  assert.deepEqual({
+    userCouponId: result.data.quote.userCouponId,
+    originalAmountCents: result.data.quote.originalAmountCents,
+    discountAmountCents: result.data.quote.discountAmountCents,
+    payableAmountCents: result.data.quote.payableAmountCents
+  }, {
+    userCouponId: 'coupon-threshold',
+    originalAmountCents: 7000,
+    discountAmountCents: 1000,
+    payableAmountCents: 6000
+  });
+
+  const belowThreshold = await main({
+    action: 'quote',
+    payload: {
+      serviceId: 'service-val-pro',
+      quantity: 1,
+      userCouponId: 'coupon-threshold'
+    }
+  });
+
+  assert.equal(belowThreshold.success, false);
+  assert.equal(belowThreshold.error.code, 'COUPON_NOT_APPLICABLE');
+  assert.equal(belowThreshold.error.message, '订单金额未满 50 元');
+});
+
+test('满减券门槛必须配置为非负整数分', async () => {
+  const template = couponTemplate({ thresholdCents: -1 });
+  const { main } = createCouponOrderFixture({ template });
+
+  const result = await main({
+    action: 'quote',
+    payload: {
+      serviceId: 'service-val-pro',
+      quantity: 1,
+      userCouponId: 'coupon-own'
+    }
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.error.code, 'COUPON_NOT_APPLICABLE');
+  assert.equal(result.error.message, '优惠券门槛配置无效');
+});
+
+test('顾客建单时原子锁券并固化优惠券价格快照', async () => {
+  const { main } = createCouponOrderFixture();
+
+  const result = await main({
+    action: 'create',
+    payload: validCreatePayload({ userCouponId: 'coupon-own' }),
+    idempotencyKey: 'coupon-order-lock'
+  });
+  const unused = await main({
+    action: 'coupon.mine.list',
+    payload: { status: 'unused' }
+  });
+
+  assert.equal(result.success, true);
+  assert.deepEqual({
+    userCouponId: result.data.order.userCouponId,
+    discountAmountCents: result.data.order.discountAmountCents,
+    payableAmountCents: result.data.order.payableAmountCents
+  }, {
+    userCouponId: 'coupon-own',
+    discountAmountCents: 1000,
+    payableAmountCents: 6000
+  });
+  assert.deepEqual(result.data.order.snapshot.pricing.coupon, {
+    id: 'template-threshold',
+    code: 'OVER_50_MINUS_10',
+    name: '满 50 减 10 元',
+    type: 'THRESHOLD',
+    discountCents: 1000,
+    thresholdCents: 5000,
+    gameIds: [],
+    categoryIds: [],
+    serviceIds: [],
+    validFrom: new Date('2026-07-01T00:00:00.000Z'),
+    validTo: new Date('2026-08-31T23:59:59.000Z')
+  });
+  assert.deepEqual(unused.data.coupons.map((item) => ({ id: item.id, status: item.status })), [
+    { id: 'coupon-own', status: 'LOCKED' }
+  ]);
+});
+
+test('相同优惠券建单请求重试时复用原服务订单', async () => {
+  const { main } = createCouponOrderFixture();
+  const event = {
+    action: 'create',
+    payload: validCreatePayload({ userCouponId: 'coupon-own' }),
+    idempotencyKey: 'coupon-order-idempotent'
+  };
+
+  const first = await main(event);
+  const retry = await main(event);
+
+  assert.equal(retry.success, true);
+  assert.equal(retry.data.reused, true);
+  assert.equal(retry.data.order.id, first.data.order.id);
+});
+
+test('已锁定优惠券不能绑定第二张服务订单', async () => {
+  const { main } = createCouponOrderFixture();
+  const payload = validCreatePayload({ userCouponId: 'coupon-own' });
+
+  await main({ action: 'create', payload, idempotencyKey: 'coupon-order-first' });
+  const repeated = await main({
+    action: 'create', payload, idempotencyKey: 'coupon-order-second'
+  });
+
+  assert.equal(repeated.success, false);
+  assert.equal(repeated.error.code, 'COUPON_ALREADY_USED');
+});
+
+test('顾客不能使用他人的优惠券创建服务订单', async () => {
+  const template = couponTemplate();
+  const foreignCoupon = customerCoupon('coupon-foreign', template, { userId: 'user-b' });
+  const { main } = createCouponOrderFixture({ template, coupons: [foreignCoupon] });
+
+  const result = await main({
+    action: 'create',
+    payload: validCreatePayload({ userCouponId: 'coupon-foreign' }),
+    idempotencyKey: 'coupon-order-foreign'
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.error.code, 'COUPON_NOT_APPLICABLE');
+});
+
+test('同一建单幂等键更换优惠券时拒绝复用原服务订单', async () => {
+  const template = couponTemplate();
+  const coupons = [
+    customerCoupon('coupon-first', template),
+    customerCoupon('coupon-second', template)
+  ];
+  const { main } = createCouponOrderFixture({ template, coupons });
+
+  await main({
+    action: 'create',
+    payload: validCreatePayload({ userCouponId: 'coupon-first' }),
+    idempotencyKey: 'coupon-order-same-key'
+  });
+  const changed = await main({
+    action: 'create',
+    payload: validCreatePayload({ userCouponId: 'coupon-second' }),
+    idempotencyKey: 'coupon-order-same-key'
+  });
+
+  assert.equal(changed.success, false);
+  assert.equal(changed.error.code, 'DUPLICATE_REQUEST');
+});
+
+function returnableCouponTemplate() {
+  return couponTemplate({
+    _id: 'template-fixed',
+    code: 'FIXED_10',
+    name: '无门槛立减 10 元',
+    type: 'FIXED',
+    thresholdCents: 0,
+  });
+}
+
+test('未付款服务订单关闭时原子退回仍有效的优惠券', async () => {
+  const template = returnableCouponTemplate();
+  const coupons = [customerCoupon('coupon-returnable', template)];
+  const { main } = createCouponOrderFixture({ template, coupons });
+  const payload = validCreatePayload({
+    quantity: 1,
+    userCouponId: 'coupon-returnable'
+  });
+
+  const first = await main({
+    action: 'create', payload, idempotencyKey: 'coupon-return-first'
+  });
+  const cancelled = await main({
+    action: 'cancel',
+    payload: { orderId: first.data.order.id, reason: '顾客取消', version: 1 }
+  });
+  const unused = await main({
+    action: 'coupon.mine.list', payload: { status: 'unused' }
+  });
+
+  assert.equal(cancelled.success, true);
+  assert.deepEqual(unused.data.coupons.map((item) => ({ id: item.id, status: item.status })), [
+    { id: 'coupon-returnable', status: 'AVAILABLE' }
+  ]);
+});
+
+test('退回的有效优惠券可以用于新的服务订单', async () => {
+  const template = returnableCouponTemplate();
+  const coupons = [customerCoupon('coupon-returnable', template)];
+  const { main } = createCouponOrderFixture({ template, coupons });
+  const payload = validCreatePayload({ quantity: 1, userCouponId: 'coupon-returnable' });
+
+  const first = await main({ action: 'create', payload, idempotencyKey: 'coupon-return-first' });
+  await main({
+    action: 'cancel',
+    payload: { orderId: first.data.order.id, reason: '顾客取消', version: 1 }
+  });
+  const afterReturn = await main({
+    action: 'create', payload, idempotencyKey: 'coupon-return-second'
+  });
+
+  assert.equal(afterReturn.success, true);
+  assert.equal(afterReturn.data.order.userCouponId, 'coupon-returnable');
+  assert.equal(afterReturn.data.order.payableAmountCents, 2500);
+});
+
+test('未付款服务订单关闭时将已过期优惠券归入已过期', async () => {
+  const template = returnableCouponTemplate();
+  const coupons = [customerCoupon('coupon-returnable', template)];
+  let timestamp = new Date('2026-07-28T00:00:00.000Z');
+  const { main } = createCouponOrderFixture({
+    template,
+    coupons,
+    now: () => timestamp
+  });
+  const payload = validCreatePayload({ quantity: 1, userCouponId: 'coupon-returnable' });
+
+  const first = await main({ action: 'create', payload, idempotencyKey: 'coupon-expiry' });
+
+  timestamp = new Date('2026-09-01T00:00:00.000Z');
+  const cancelledAfterExpiry = await main({
+    action: 'cancel',
+    payload: { orderId: first.data.order.id, reason: '顾客取消', version: 1 }
+  });
+  const expiredCoupons = await main({
+    action: 'coupon.mine.list',
+    payload: { status: 'expired', limit: 10 }
+  });
+
+  assert.equal(cancelledAfterExpiry.success, true);
+  assert.deepEqual(expiredCoupons.data.coupons.map((item) => ({
+    id: item.id,
+    status: item.status
+  })), [{ id: 'coupon-returnable', status: 'EXPIRED' }]);
+});
+
 test('顾客报价由云端套餐单价和数量计算，不接受客户端金额', async () => {
   const { createOrderHandler } = require('../cloudfunctions/order/handler');
   const cloud = createMemoryCloud({ users: [customer()], services: [service()] });
@@ -230,6 +796,7 @@ test('顾客创建未付款服务订单并保存不可变下单快照', async ()
     originalAmountCents: 7000,
     discountAmountCents: 0,
     payableAmountCents: 7000,
+    userCouponId: null,
     paidAmountCents: 0,
     paymentStatus: 'UNPAID',
     fulfillmentStatus: 'NOT_STARTED',

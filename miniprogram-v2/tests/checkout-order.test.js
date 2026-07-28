@@ -116,6 +116,134 @@ test('确认订单数量变化后展示云函数重新计算的当前套餐金�
   );
 });
 
+test('确认订单展示可用和不可用优惠券并按所选券刷新实付金额', async () => {
+  const result = loadCheckout((name, data) => {
+    if (name === 'catalog') return success({ service: checkoutService() });
+    if (data.action === 'coupon.available.list') {
+      return success({
+        coupons: [
+          {
+            id: 'coupon-newcomer',
+            available: true,
+            unavailableReason: '',
+            discountAmountCents: 1000,
+            payableAmountCents: 2500,
+            validTo: '2026-08-31T23:59:59.000Z',
+            template: {
+              name: '新人立减 10 元', type: 'FIXED', discountCents: 1000,
+              thresholdCents: 0, gameIds: [], categoryIds: [], serviceIds: []
+            }
+          },
+          {
+            id: 'coupon-threshold',
+            available: false,
+            unavailableReason: '订单金额未满 50 元',
+            discountAmountCents: 0,
+            payableAmountCents: 3500,
+            validTo: '2026-08-31T23:59:59.000Z',
+            template: {
+              name: '满 50 减 10 元', type: 'THRESHOLD', discountCents: 1000,
+              thresholdCents: 5000, gameIds: [], categoryIds: [], serviceIds: []
+            }
+          }
+        ]
+      });
+    }
+    if (data.action === 'create') {
+      return success({
+        reused: false,
+        order: {
+          id: 'order-with-coupon',
+          orderNo: 'BBX-COUPON-001',
+          quantity: 1,
+          unitPriceCents: 3500,
+          discountAmountCents: 1000,
+          payableAmountCents: 2500,
+          userCouponId: 'coupon-newcomer',
+          snapshot: {
+            service: { name: '钻石段位技术陪', unitLabel: '局' },
+            fulfillmentStandard: '按订单约定完成服务'
+          }
+        }
+      });
+    }
+    assert.equal(data.action, 'quote');
+    return success({
+      quote: {
+        payableAmountCents: data.payload.userCouponId ? 2500 : 3500
+      }
+    });
+  });
+
+  await result.page.onLoad();
+
+  assert.equal(result.page.data.availableCouponCount, 1);
+  assert.equal(result.page.data.couponSummary, '1 张可用 ›');
+  assert.equal(result.page.data.coupons[1].unavailableReason, '订单金额未满 50 元');
+
+  await result.page.selectCoupon({ currentTarget: { dataset: { id: 'coupon-newcomer' } } });
+
+  assert.equal(result.page.data.selectedCouponId, 'coupon-newcomer');
+  assert.equal(result.page.data.couponSummary, '新人立减 10 元 ›');
+  assert.equal(result.page.data.total, 25);
+  const selectedQuote = result.calls.filter(
+    (call) => call.name === 'order' && call.data.action === 'quote'
+  ).at(-1);
+  assert.equal(selectedQuote.data.payload.userCouponId, 'coupon-newcomer');
+
+  result.page.onServerChange({ detail: { value: 0 } });
+  result.page.onIdInput({ detail: { value: 'CloudPlayer' } });
+  result.page.toggleAdult();
+  await result.page.onPay();
+
+  const createCall = result.calls.find(
+    (call) => call.name === 'order' && call.data.action === 'create'
+  );
+  assert.equal(createCall.data.payload.userCouponId, 'coupon-newcomer');
+});
+
+test('确认订单重新打开优惠券时移除已失效选择并恢复原价', async () => {
+  let couponReads = 0;
+  const result = loadCheckout((name, data) => {
+    if (name === 'catalog') return success({ service: checkoutService() });
+    if (data.action === 'coupon.available.list') {
+      couponReads += 1;
+      return success({
+        coupons: [{
+          id: 'coupon-newcomer',
+          available: couponReads === 1,
+          unavailableReason: couponReads === 1 ? '' : '优惠券已被其他订单占用',
+          discountAmountCents: couponReads === 1 ? 1000 : 0,
+          payableAmountCents: couponReads === 1 ? 2500 : 3500,
+          validTo: '2026-08-31T23:59:59.000Z',
+          template: {
+            name: '新人立减 10 元', type: 'FIXED', discountCents: 1000,
+            thresholdCents: 0, gameIds: [], categoryIds: [], serviceIds: []
+          }
+        }]
+      });
+    }
+    assert.equal(data.action, 'quote');
+    return success({
+      quote: { payableAmountCents: data.payload.userCouponId ? 2500 : 3500 }
+    });
+  });
+
+  await result.page.onLoad();
+  await result.page.selectCoupon({ currentTarget: { dataset: { id: 'coupon-newcomer' } } });
+  assert.equal(result.page.data.total, 25);
+
+  await result.page.openCoupon();
+
+  assert.equal(result.page.data.selectedCouponId, '');
+  assert.equal(result.page.data.couponSummary, '暂无可用 ›');
+  assert.equal(result.page.data.total, 35);
+  const latestQuote = result.calls.filter(
+    (call) => call.name === 'order' && call.data.action === 'quote'
+  ).at(-1);
+  assert.equal(latestQuote.data.payload.userCouponId, undefined);
+});
+
 test('确认订单提交当前表单并保存云端创建的真实服务订单', async () => {
   const result = loadCheckout((name, data) => {
     if (name === 'catalog') return success({ service: checkoutService() });

@@ -30,7 +30,7 @@
     </view>
     <view class="row between">
       <text>优惠券</text>
-      <view class="top-text" hover-class="top-text-hover" bindtap="openCoupon">暂无可用 ›</view>
+      <view class="top-text" hover-class="top-text-hover" bindtap="openCoupon">{{couponSummary}}</view>
     </view>
     <view class="row between">
       <text>单价</text>
@@ -137,8 +137,38 @@
   <view class="sheet" catchtap="noop">
     <view class="sheet-handle"></view>
     <view class="h2">优惠券</view>
-    <view class="p muted" style="margin:12rpx 0 28rpx">当前套餐暂无可用优惠券。</view>
-    <view class="btn btn-secondary" style="width:100%" hover-class="btn-hover" bindtap="closeCoupon">知道了</view>
+    <view class="p muted" style="margin:12rpx 0 28rpx">一张服务订单最多使用一张，实付金额以服务端报价为准。</view>
+    <view class="p muted" wx:if="{{couponLoading}}">正在读取优惠券…</view>
+    <view class="p error" wx:if="{{couponError}}">{{couponError}}</view>
+    <view class="coupon-option {{selectedCouponId ? '' : 'selected'}}" hover-class="row-hover" bindtap="clearCoupon">
+      <view>
+        <view class="h3">不使用优惠券</view>
+        <view class="p muted">按当前套餐原价结算</view>
+      </view>
+      <text class="link">{{selectedCouponId ? '选择' : '已选'}}</text>
+    </view>
+    <view
+      wx:for="{{coupons}}"
+      wx:for-item="coupon"
+      wx:key="id"
+      class="coupon-option {{coupon.available ? '' : 'disabled'}} {{selectedCouponId === coupon.id ? 'selected' : ''}}"
+      hover-class="{{coupon.available ? 'row-hover' : 'none'}}"
+      data-id="{{coupon.id}}"
+      bindtap="selectCoupon"
+    >
+      <view class="coupon-option-value">
+        <text class="price">{{coupon.amountText}}</text>
+        <text class="p muted">{{coupon.thresholdText}}</text>
+      </view>
+      <view class="coupon-option-copy">
+        <view class="h3">{{coupon.name}}</view>
+        <view class="p">{{coupon.scopeText}} · 有效至 {{coupon.validText}}</view>
+        <view class="p error" wx:if="{{!coupon.available}}">{{coupon.unavailableReason}}</view>
+      </view>
+      <text class="link" wx:if="{{coupon.available}}">{{selectedCouponId === coupon.id ? '已选' : '选择'}}</text>
+    </view>
+    <view class="p muted" wx:if="{{!couponLoading && coupons.length === 0 && !couponError}}">当前套餐暂无优惠券。</view>
+    <view class="btn btn-secondary" style="width:100%;margin-top:28rpx" hover-class="btn-hover" bindtap="closeCoupon">关闭</view>
   </view>
 </view>
 

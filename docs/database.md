@@ -207,7 +207,7 @@
 | `orderNo` | string | 平台订单号，唯一 |
 | `userId` | string | 顾客 ID |
 | `serviceId` | string | 服务套餐来源引用，仅用于追踪 |
-| `snapshot` | object | 套餐、价格、字段、标准、须知和协议的不可变快照 |
+| `snapshot` | object | 套餐、价格、所选券模板、字段、标准、须知和协议的不可变快照 |
 | `quantity` | number | 购买数量 |
 | `unitPriceCents` | number | 下单单价 |
 | `originalAmountCents` | number | 优惠前金额 |
@@ -226,11 +226,11 @@
 | `assignedStaffId` | string/null | 当前内部服务人员 |
 | `paidAt` / `startedAt` / `completedAt` / `closedAt` | date/null | 关键时间 |
 | `idempotencyKey` | string | 建单幂等键 |
-| `requestHash` | string | 套餐、数量和下单字段的规范化请求摘要，用于识别同键异参 |
+| `requestHash` | string | 套餐、数量、下单字段和顾客券的规范化请求摘要，用于识别同键异参 |
 
 索引：`orderNo` 唯一；`userId + createdAt`；`userId + paymentStatus + fulfillmentStatus + createdAt`；`paymentStatus + fulfillmentStatus + scheduledAt`；`assignedStaffId + fulfillmentStatus`；`idempotencyKey + userId` 唯一。
 
-Issue #5 的 `snapshot` 固化服务套餐标识、名称、游戏、服务类型、专区、计价单位、当前单价、数量、应付金额、动态字段定义与值、详情块、履约标准、购买须知和协议。正式协议尚未提供时，开发环境只保存明确标记 `isDevelopmentPlaceholder = true` 的占位服务规则，正式运营前必须替换。
+`snapshot` 固化服务套餐标识、名称、游戏、服务类型、专区、计价单位、当前单价、数量、优惠金额、应付金额、所选券模板、动态字段定义与值、详情块、履约标准、购买须知和协议。正式协议尚未提供时，开发环境只保存明确标记 `isDevelopmentPlaceholder = true` 的占位服务规则，正式运营前必须替换。
 
 ### 6.3 `order_logs`
 
@@ -264,13 +264,15 @@ Issue #5 的 `snapshot` 固化服务套餐标识、名称、游戏、服务类�
 
 字段：`code`、`name`、`type`（`FIXED`/`THRESHOLD`）、`discountCents`、`thresholdCents`、`gameIds[]`、`categoryIds[]`、`serviceIds[]`、`validFrom`、`validTo`、`perUserLimit`、`totalLimit`、`issuedCount`、`status`。
 
+`FIXED` 表示无门槛立减，`THRESHOLD` 表示原价达到 `thresholdCents` 后立减；`gameIds`、`categoryIds`、`serviceIds` 均为空时表示全部服务套餐。金额均为整数分。
+
 索引：`code` 唯一；`status + validFrom + validTo`。
 
 ### 8.2 `user_coupons`
 
 字段：`userId`、`templateId`、`status`（`AVAILABLE`/`LOCKED`/`USED`/`EXPIRED`/`VOID`）、`validFrom`、`validTo`、`lockedOrderId`、`usedOrderId`、`lockedAt`、`usedAt`、`grantSource`。
 
-索引：`userId + status + validTo`；`lockedOrderId`；`usedOrderId`。锁券、核销和退回必须在云函数事务中完成。
+索引：`userId + status + validTo`；`lockedOrderId`；`usedOrderId`。读取“我的优惠券”时，自然到期但尚未写回的 `AVAILABLE` 券按 `EXPIRED` 展示；尚未生效的券保留在未使用分类并明确返回不可用原因；实际展示期限取模板与顾客券期限的交集。锁券、核销和退回必须与服务订单的对应状态变化在同一个云函数事务中完成：建单时 `AVAILABLE → LOCKED`，支付成功时 `LOCKED → USED`，未付款订单关闭时按有效期和模板状态退回 `AVAILABLE`、`EXPIRED` 或 `VOID`。
 
 ## 9. 评价与投诉
 

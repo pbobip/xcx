@@ -2,11 +2,27 @@ const nav = require('../../utils/nav');
 const store = require('../../utils/store');
 const auth = require('../../utils/auth');
 const catalog = require('../../utils/catalog');
+const coupon = require('../../utils/coupon');
 const order = require('../../utils/order');
 
 function yuan(cents) {
   const value = (Number(cents) || 0) / 100;
   return Number.isInteger(value) ? value : Number(value.toFixed(2));
+}
+
+function checkoutCouponView(item) {
+  const base = coupon.view(item);
+  return {
+    id: base.id,
+    name: base.name,
+    amountText: base.amountText,
+    thresholdText: base.thresholdText,
+    scopeText: base.scopeText,
+    validText: base.validToText,
+    available: item.available === true,
+    unavailableReason: item.unavailableReason || '',
+    discountAmountCents: item.discountAmountCents || 0
+  };
 }
 
 function requiredFieldMap(fields) {
@@ -55,6 +71,12 @@ Page({
     catalogLoading: true,
     catalogBlocked: true,
     couponOpen: false,
+    coupons: [],
+    availableCouponCount: 0,
+    selectedCouponId: '',
+    couponSummary: '暂无可用 ›',
+    couponLoading: false,
+    couponError: '',
     paying: false,
     quoting: false,
     idempotencyKey: ''
@@ -106,7 +128,10 @@ Page({
         error: catalogBlocked ? '该服务套餐当前暂停接单，请返回目录选择其他套餐。' : ''
       });
       store.setSelectedService({ id: service.id, code: service.code, source: 'checkout' });
-      if (!catalogBlocked) await this.refreshQuote(service.minQuantity || 1);
+      if (!catalogBlocked) {
+        await this.refreshCoupons(service.minQuantity || 1);
+        await this.refreshQuote(service.minQuantity || 1);
+      }
     } catch (error) {
       this.setData({ catalogBlocked: true, error: error.message || '套餐已下架或暂时无法读取。' });
     } finally {
@@ -138,10 +163,12 @@ Page({
     if (!this.data.pkg || this.data.catalogBlocked) return;
     this.setData({ quoting: true });
     try {
-      const data = await order.call('quote', {
+      const payload = {
         serviceId: this.data.pkg.id,
         quantity
-      });
+      };
+      if (this.data.selectedCouponId) payload.userCouponId = this.data.selectedCouponId;
+      const data = await order.call('quote', payload);
       this.setData({ total: yuan(data.quote.payableAmountCents), error: '' });
     } catch (error) {
       this.setData({ error: error.message || '金额计算失败，请稍后重试。' });
@@ -154,15 +181,70 @@ Page({
     const step = Number(e.currentTarget.dataset.step);
     const next = Math.max(this.data.minQuantity, Math.min(this.data.maxQuantity, this.data.qty + step));
     this.setData({ qty: next });
+    await this.refreshCoupons(next);
     await this.refreshQuote(next);
   },
 
-  openCoupon() {
+  async refreshCoupons(quantity) {
+    if (!this.data.pkg || this.data.catalogBlocked) return;
+    this.setData({ couponLoading: true, couponError: '' });
+    try {
+      const data = await order.call('coupon.available.list', {
+        serviceId: this.data.pkg.id,
+        quantity
+      });
+      const coupons = (data.coupons || []).map(checkoutCouponView);
+      const availableCouponCount = coupons.filter((item) => item.available).length;
+      const selected = coupons.find((item) => item.id === this.data.selectedCouponId);
+      const selectedCouponId = selected && selected.available ? selected.id : '';
+      this.setData({
+        coupons,
+        availableCouponCount,
+        selectedCouponId,
+        couponSummary: selectedCouponId
+          ? selected.name + ' ›'
+          : availableCouponCount ? `${availableCouponCount} 张可用 ›` : '暂无可用 ›'
+      });
+    } catch (error) {
+      this.setData({ couponError: error.message || '优惠券加载失败，请稍后重试。' });
+    } finally {
+      this.setData({ couponLoading: false });
+    }
+  },
+
+  async openCoupon() {
+    const selectedCouponId = this.data.selectedCouponId;
     this.setData({ couponOpen: true });
+    await this.refreshCoupons(this.data.qty);
+    if (selectedCouponId && !this.data.selectedCouponId) {
+      await this.refreshQuote(this.data.qty);
+    }
   },
 
   closeCoupon() {
     this.setData({ couponOpen: false });
+  },
+
+  async selectCoupon(e) {
+    const selected = this.data.coupons.find((item) => item.id === e.currentTarget.dataset.id);
+    if (!selected || !selected.available) return;
+    this.setData({
+      selectedCouponId: selected.id,
+      couponSummary: selected.name + ' ›',
+      couponOpen: false
+    });
+    await this.refreshQuote(this.data.qty);
+  },
+
+  async clearCoupon() {
+    this.setData({
+      selectedCouponId: '',
+      couponSummary: this.data.availableCouponCount
+        ? `${this.data.availableCouponCount} 张可用 ›`
+        : '暂无可用 ›',
+      couponOpen: false
+    });
+    await this.refreshQuote(this.data.qty);
   },
 
   onServerChange(e) {
@@ -248,7 +330,7 @@ Page({
       ? `${this.data.scheduledDate}T${this.data.scheduledTime}:00+08:00`
       : '';
     try {
-      const data = await order.call('create', {
+      const createPayload = {
         serviceId: this.data.pkg.id,
         quantity: this.data.qty,
         orderValues: {
@@ -260,7 +342,11 @@ Page({
           customerNote: this.data.note.trim(),
           adultConfirmed: 'CONFIRMED'
         }
-      }, { idempotencyKey: this.data.idempotencyKey });
+      };
+      if (this.data.selectedCouponId) createPayload.userCouponId = this.data.selectedCouponId;
+      const data = await order.call('create', createPayload, {
+        idempotencyKey: this.data.idempotencyKey
+      });
       const cloudOrder = data.order;
       const snapshotService = cloudOrder.snapshot.service;
       store.setLastOrder(Object.assign({}, cloudOrder, {

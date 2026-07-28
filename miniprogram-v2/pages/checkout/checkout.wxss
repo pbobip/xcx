@@ -3,3 +3,9 @@
 .step-btn-hover { background: var(--paper-accent72); }
 .top-text-hover { opacity: 0.6; }
 .select-hover { border-color: var(--surface); box-shadow: 0 0 0 6rpx var(--accent-a64); }
+.coupon-option { display: flex; align-items: center; gap: 20rpx; padding: 24rpx 0; border-top: 2rpx solid var(--line); }
+.coupon-option.selected { background: var(--paper-accent42); }
+.coupon-option.disabled { opacity: 0.55; }
+.coupon-option-value { width: 150rpx; flex: 0 0 auto; }
+.coupon-option-value text { display: block; }
+.coupon-option-copy { flex: 1; min-width: 0; }

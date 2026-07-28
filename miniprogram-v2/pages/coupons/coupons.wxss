@@ -1,2 +1,9 @@
 /* 我的优惠券页特有样式 */
 .seg-btn-hover { background: var(--paper-accent42); }
+.coupon-card { display: flex; padding: 0; overflow: hidden; }
+.coupon-value { width: 210rpx; padding: 36rpx 24rpx; display: flex; flex-direction: column; justify-content: center; align-items: center; background: var(--paper-accent42); border-right: 2rpx dashed var(--surface); }
+.coupon-amount { font-size: 48rpx; font-weight: 900; color: var(--ink); }
+.coupon-threshold { margin-top: 8rpx; font-size: 22rpx; color: var(--muted); text-align: center; }
+.coupon-copy { flex: 1; min-width: 0; padding: 30rpx; }
+.coupon-copy .p { display: block; margin-top: 12rpx; }
+.load-more { width: 100%; margin-top: 20rpx; }
