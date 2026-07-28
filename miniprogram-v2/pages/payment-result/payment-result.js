@@ -33,6 +33,8 @@ Page({
   onViewOrder() {
     if (!this.data.order) return;
     store.setSelectedOrder(Object.assign({ status: '待付款' }, this.data.order));
-    nav.go('order-detail');
+    wx.navigateTo({
+      url: `/pages/order-detail/order-detail?orderId=${this.data.order.id}`
+    });
   }
 });

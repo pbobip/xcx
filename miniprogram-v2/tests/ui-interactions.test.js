@@ -665,6 +665,28 @@ test('支付结果页不向顾客暴露测试状态切换器', () => {
   assert.match(source, /订单已创建/);
 });
 
+test('支付结果页查看订单时携带新建服务订单 ID', () => {
+  const result = loadPage('pages/payment-result/payment-result.js', {
+    bbx_current_user: { id: 'users-test' },
+    bbx_last_order: {
+      id: 'orders-1',
+      orderNo: 'BBX-20260728-000001',
+      title: '钻石段位技术陪',
+      qty: 1,
+      unit: '局',
+      total: 25
+    }
+  });
+
+  result.page.onShow();
+  result.page.onViewOrder();
+
+  assert.deepEqual(result.calls.at(-1), {
+    type: 'navigateTo',
+    url: '/pages/order-detail/order-detail?orderId=orders-1'
+  });
+});
+
 test('关键页面保留防重叠布局约束', () => {
   const appStyles = readSource('app.wxss');
   const detailMarkup = readSource('pages/service-detail/service-detail.wxml');
