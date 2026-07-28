@@ -8,6 +8,7 @@ const {
 Page({
   data: {
     loading: true,
+    error: '',
     order: null,
     statusText: '',
     statusTitle: '',
@@ -57,7 +58,7 @@ Page({
   },
 
   loadOrder() {
-    this.setData({ loading: true });
+    this.setData({ loading: true, error: '' });
     const payload = this._orderId
       ? { orderId: this._orderId }
       : { orderNo: this._orderNo };
@@ -67,8 +68,11 @@ Page({
       data: { action: 'detail', payload }
     }).then((res) => {
       if (!res.result || !res.result.success) {
-        nav.toast(res.result && res.result.error ? res.result.error.message : '加载失败');
-        this.setData({ loading: false });
+        const message = res.result && res.result.error
+          ? res.result.error.message
+          : '订单详情加载失败，请稍后重试';
+        nav.toast(message);
+        this.setData({ loading: false, error: message });
         return;
       }
       const order = res.result.data.order;
@@ -83,6 +87,7 @@ Page({
 
       this.setData({
         loading: false,
+        error: '',
         order,
         statusText: statusText(order),
         statusTitle: statusTitle(order),
@@ -100,8 +105,12 @@ Page({
       });
     }).catch(() => {
       nav.toast('网络异常，请重试');
-      this.setData({ loading: false });
+      this.setData({ loading: false, error: '网络异常，订单详情加载失败，请稍后重试' });
     });
+  },
+
+  retry() {
+    return this.loadOrder();
   },
 
   noop() {},

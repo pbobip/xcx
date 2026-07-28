@@ -378,6 +378,56 @@ test('订单详情页通过 URL 参数 orderNo 从云端加载', () => {
   assert.equal(detailCall.data.payload.orderNo, 'BBX-20260727-182734-ERI36I');
 });
 
+test('顾客订单详情加载失败后可从错误状态重试并恢复快照', async () => {
+  let attempts = 0;
+  const detail = loadPage('pages/order-detail/order-detail.js', {
+    bbx_current_user: {
+      id: 'users-test',
+      platformUserNo: 'BBX-TEST',
+      nickname: '微信用户',
+      avatarFileId: null
+    }
+  }, {
+    cloudCall: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('network unavailable');
+      return {
+        result: {
+          success: true,
+          data: {
+            order: {
+              id: 'order-1',
+              orderNo: 'BBX-TEST-001',
+              paymentStatus: 'UNPAID',
+              fulfillmentStatus: 'NOT_STARTED',
+              afterSalesStatus: 'NONE',
+              version: 1,
+              snapshot: {
+                service: { code: 'VAL_PRO', name: '钻石段位技术陪', unitLabel: '局' },
+                pricing: { quantity: 1, payableAmountCents: 3500 },
+                orderValues: { platform: 'PC', region: '国服' },
+                fulfillmentStandard: '按订单约定完成服务'
+              }
+            },
+            timeline: []
+          }
+        }
+      };
+    }
+  });
+
+  detail.page.onLoad({ orderNo: 'BBX-TEST-001' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(detail.page.data.error, /网络异常/);
+  assert.match(readSource('pages/order-detail/order-detail.wxml'), /bindtap="retry"/);
+
+  await detail.page.retry();
+
+  assert.equal(detail.page.data.error, '');
+  assert.equal(detail.page.data.title, '钻石段位技术陪');
+});
+
 test('首页云端推荐卡打开与卡片文案一致的技术陪套餐', async () => {
   const service = {
     id: 'service-val-pro',

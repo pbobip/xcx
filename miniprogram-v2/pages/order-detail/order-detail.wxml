@@ -4,7 +4,17 @@
     <text class="muted">加载中…</text>
   </view>
 
-  <block wx:if="{{!loading && order}}">
+  <!-- 失败状态 -->
+  <view class="empty card" wx:if="{{!loading && error}}">
+    <view>
+      <view class="empty-mark"><view class="icon i-order"></view></view>
+      <view class="h2">订单详情暂时无法加载</view>
+      <view class="p">{{error}}</view>
+      <button class="btn btn-secondary state-button" bindtap="retry">重新加载</button>
+    </view>
+  </view>
+
+  <block wx:if="{{!loading && !error && order}}">
     <!-- 状态头部 -->
     <view class="card pad">
       <view class="row between">
