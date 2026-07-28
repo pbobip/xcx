@@ -17,7 +17,12 @@ function createMemoryCloud(seed, openid = 'openid-customer-a') {
   let nextId = 1;
 
   function matches(record, query) {
-    return Object.entries(query || {}).every(([key, value]) => record[key] === value);
+    if (query && query.$or) return query.$or.some(q => matches(record, q));
+    return Object.entries(query || {}).every(([key, value]) => {
+      if (value && typeof value === 'object' && value.$in) return value.$in.includes(record[key]);
+      if (value && typeof value === 'object' && value.$neq !== undefined) return record[key] !== value.$neq;
+      return record[key] === value;
+    });
   }
 
   function collection(name) {
@@ -25,13 +30,26 @@ function createMemoryCloud(seed, openid = 'openid-customer-a') {
     return {
       where(query) {
         let limit = Infinity;
+        let skip = 0;
+        let order = [];
         return {
-          limit(count) {
-            limit = count;
-            return this;
+          limit(count) { limit = count; return this; },
+          skip(count) { skip = count; return this; },
+          orderBy(field, dir) { order.push({field, dir}); return this; },
+          async count() {
+            return { total: data[name].filter((record) => matches(record, query)).length };
           },
           async get() {
-            return { data: data[name].filter((record) => matches(record, query)).slice(0, limit).map(clone) };
+            let filtered = data[name].filter((record) => matches(record, query));
+            for (let i = order.length - 1; i >= 0; i--) {
+              const { field, dir } = order[i];
+              filtered.sort((a, b) => {
+                if (a[field] < b[field]) return dir === 'desc' ? 1 : -1;
+                if (a[field] > b[field]) return dir === 'desc' ? -1 : 1;
+                return 0;
+              });
+            }
+            return { data: filtered.slice(skip, skip + limit).map(clone) };
           }
         };
       },
@@ -39,6 +57,12 @@ function createMemoryCloud(seed, openid = 'openid-customer-a') {
         return {
           async get() {
             return { data: clone(data[name].find((record) => record._id === id) || null) };
+          },
+          async update({ data: updateData }) {
+            const record = data[name].find((record) => record._id === id);
+            if (!record) return { stats: { updated: 0 } };
+            Object.assign(record, clone(updateData));
+            return { stats: { updated: 1 } };
           }
         };
       },
@@ -52,6 +76,11 @@ function createMemoryCloud(seed, openid = 'openid-customer-a') {
 
   const database = {
     collection,
+    command: {
+      in: (arr) => ({ $in: arr }),
+      neq: (val) => ({ $neq: val }),
+      or: (arr) => ({ $or: arr })
+    },
     async runTransaction(callback) {
       return callback({ collection });
     }
@@ -415,4 +444,122 @@ test('暂停接单套餐不能报价或创建服务订单', async () => {
 
   assert.equal(result.success, false);
   assert.equal(result.error.code, 'SERVICE_PAUSED');
+});
+
+function createMockOrders(userId) {
+  const now = new Date();
+  return [
+    { _id: 'o1', userId, paymentStatus: 'UNPAID', fulfillmentStatus: 'NOT_STARTED', afterSalesStatus: 'NONE', createdAt: new Date(now - 10000), snapshot: { service: { name: 'A' } }, orderNo: 'N1' },
+    { _id: 'o2', userId, paymentStatus: 'PAID', fulfillmentStatus: 'PENDING_ASSIGNMENT', afterSalesStatus: 'NONE', createdAt: new Date(now - 8000), snapshot: { service: { name: 'B' } }, orderNo: 'N2' },
+    { _id: 'o3', userId, paymentStatus: 'PAID', fulfillmentStatus: 'WAITING_START', afterSalesStatus: 'NONE', createdAt: new Date(now - 6000), snapshot: { service: { name: 'C' } }, orderNo: 'N3' },
+    { _id: 'o4', userId, paymentStatus: 'PAID', fulfillmentStatus: 'IN_SERVICE', afterSalesStatus: 'NONE', createdAt: new Date(now - 4000), snapshot: { service: { name: 'D' } }, orderNo: 'N4' },
+    { _id: 'o5', userId, paymentStatus: 'PAID', fulfillmentStatus: 'WAITING_CONFIRMATION', afterSalesStatus: 'NONE', createdAt: new Date(now - 2000), snapshot: { service: { name: 'E' } }, orderNo: 'N5' },
+    { _id: 'o6', userId, paymentStatus: 'PAID', fulfillmentStatus: 'COMPLETED', afterSalesStatus: 'NONE', createdAt: now, snapshot: { service: { name: 'F' } }, orderNo: 'N6' }
+  ];
+}
+
+test('获取订单状态统计', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const cloud = createMemoryCloud({
+    users: [customer(), { _id: 'user-b', openid: 'openid-b', status: 'ACTIVE' }],
+    orders: createMockOrders('user-a')
+  });
+  const mainA = createOrderHandler({ cloud });
+  const resultA = await mainA({ action: 'summary', requestId: 's1' });
+  assert.deepEqual(resultA.data.counts, { all: 6, unpaid: 1, waiting: 2, inProgress: 2, completed: 1 });
+
+  const cloudB = createMemoryCloud({
+    users: [{ _id: 'user-b', openid: 'openid-customer-b', status: 'ACTIVE' }],
+    orders: createMockOrders('user-a')
+  }, 'openid-customer-b');
+  const mainB = createOrderHandler({ cloud: cloudB });
+  const resultB = await mainB({ action: 'summary', requestId: 's2' });
+  assert.deepEqual(resultB.data.counts, { all: 0, unpaid: 0, waiting: 0, inProgress: 0, completed: 0 });
+});
+
+test('分页查询订单列表', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    orders: createMockOrders('user-a')
+  });
+  const main = createOrderHandler({ cloud });
+
+  const result1 = await main({ action: 'list', payload: { tab: 'all', limit: 2 } });
+  assert.equal(result1.data.orders.length, 2);
+  assert.equal(result1.data.orders[0].id, 'o6'); // 降序
+  assert.equal(result1.data.orders[1].id, 'o5');
+  assert.equal(result1.data.nextCursor, 'o5');
+
+  const result2 = await main({ action: 'list', payload: { tab: 'waiting', limit: 10 } });
+  assert.equal(result2.data.orders.length, 2);
+  assert.equal(result2.data.orders[0].id, 'o3');
+  assert.equal(result2.data.orders[1].id, 'o2');
+});
+
+test('查询订单详情与操作时间线', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    orders: createMockOrders('user-a'),
+    order_logs: [
+      { orderId: 'o1', customerVisible: true, action: 'CREATE', customerMessage: '创建', createdAt: new Date(1) },
+      { orderId: 'o1', customerVisible: false, action: 'INTERNAL', customerMessage: '', createdAt: new Date(2) },
+      { orderId: 'o1', customerVisible: true, action: 'REMIND', customerMessage: '提醒付款', createdAt: new Date(3) }
+    ]
+  });
+  const main = createOrderHandler({ cloud });
+
+  const result = await main({ action: 'detail', payload: { orderId: 'o1' } });
+  assert.equal(result.data.order.id, 'o1');
+  assert.equal(result.data.timeline.length, 2);
+  assert.equal(result.data.timeline[0].action, 'REMIND'); // 降序
+  assert.deepEqual(result.data.actions, ['contact', 'cancel', 'pay']);
+});
+
+test('取消未支付订单', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    orders: [{ _id: 'o1', userId: 'user-a', orderNo: 'N1', paymentStatus: 'UNPAID', fulfillmentStatus: 'NOT_STARTED', version: 1 }],
+    order_logs: []
+  });
+  const main = createOrderHandler({ cloud });
+
+  const conflict = await main({ action: 'cancel', payload: { orderId: 'o1', version: 9 } });
+  assert.equal(conflict.error.code, 'CONFLICT');
+
+  const success = await main({ action: 'cancel', payload: { orderId: 'o1', reason: '不想买了', version: 1 } });
+  assert.equal(success.success, true);
+  assert.equal(success.data.order.paymentStatus, 'CLOSED');
+  assert.equal(success.data.order.fulfillmentStatus, 'CANCELLED');
+  assert.equal(success.data.order.version, 2);
+});
+
+test('确认完成服务', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    orders: [{ _id: 'o1', userId: 'user-a', orderNo: 'N1', fulfillmentStatus: 'WAITING_CONFIRMATION', afterSalesStatus: 'NONE', version: 1 }],
+    order_logs: []
+  });
+  const main = createOrderHandler({ cloud });
+
+  const success = await main({ action: 'confirm', payload: { orderId: 'o1', version: 1 } });
+  assert.equal(success.success, true);
+  assert.equal(success.data.order.fulfillmentStatus, 'COMPLETED');
+});
+
+test('对服务发起异议', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    orders: [{ _id: 'o1', userId: 'user-a', orderNo: 'N1', fulfillmentStatus: 'WAITING_CONFIRMATION', afterSalesStatus: 'NONE', version: 1 }],
+    order_logs: []
+  });
+  const main = createOrderHandler({ cloud });
+
+  const success = await main({ action: 'dispute', payload: { orderId: 'o1', reason: '态度恶劣', description: '一直骂人', version: 1 } });
+  assert.equal(success.success, true);
+  assert.equal(success.data.order.afterSalesStatus, 'REQUESTED');
 });

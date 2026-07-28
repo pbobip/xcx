@@ -1,62 +1,127 @@
 <view class="page">
-  <view class="card pad">
-    <view class="row between">
-      <view>
-        <view class="p eyebrow">{{order.status}}</view>
-        <view class="h2" style="font-size:42rpx;margin-top:12rpx">{{statusTitle}}</view>
-      </view>
-      <view class="icon i-clock"></view>
-    </view>
-    <view class="p muted" style="margin-top:20rpx">若服务不满意可申请换人；异常问题由平台售后处理。</view>
+  <!-- 加载中 -->
+  <view wx:if="{{loading}}" class="loading-hint" style="padding:120rpx 0;text-align:center">
+    <text class="muted">加载中…</text>
   </view>
 
-  <view class="card pad">
-    <view class="h2" style="font-size:32rpx;margin-bottom:32rpx">履约进度</view>
-    <view class="timeline">
-      <view class="timeline-step {{progressIndex > 0 ? 'done' : ''}} {{progressIndex === 0 ? 'current' : ''}}">
-        <text class="strong">支付已确认</text>
-        <text>{{order.title}} · ¥{{order.total}}</text>
+  <block wx:if="{{!loading && order}}">
+    <!-- 状态头部 -->
+    <view class="card pad">
+      <view class="row between">
+        <view>
+          <view class="p eyebrow">{{statusText}}</view>
+          <view class="h2" style="font-size:42rpx;margin-top:12rpx">{{statusTitle}}</view>
+        </view>
+        <view class="icon i-clock"></view>
       </view>
-      <view class="timeline-step {{progressIndex > 1 ? 'done' : ''}} {{progressIndex === 1 ? 'current' : ''}}">
-        <text class="strong">待人工派单</text>
-        <text>正在匹配符合“{{order.standard}}”要求的陪玩</text>
-      </view>
-      <view class="timeline-step {{progressIndex > 2 ? 'done' : ''}} {{progressIndex === 2 ? 'current' : ''}}">
-        <text class="strong">开始服务</text>
-        <text>陪玩到位后由平台更新进度</text>
-      </view>
-      <view class="timeline-step {{progressIndex === 3 ? 'current' : ''}}">
-        <text class="strong">完成并评价</text>
-        <text>真实评价将计入服务评分</text>
+      <view class="p muted" style="margin-top:20rpx">若服务不满意可申请换人；异常问题由平台售后处理。</view>
+    </view>
+
+    <!-- 履约进度 -->
+    <view class="card pad">
+      <view class="h2" style="font-size:32rpx;margin-bottom:32rpx">履约进度</view>
+      <view class="timeline">
+        <view class="timeline-step {{progressIndex > 0 ? 'done' : ''}} {{progressIndex === 0 ? 'current' : ''}}">
+          <text class="strong">支付已确认</text>
+          <text>{{title}} · ¥{{payableYuan}}</text>
+        </view>
+        <view class="timeline-step {{progressIndex > 1 ? 'done' : ''}} {{progressIndex === 1 ? 'current' : ''}}">
+          <text class="strong">待人工派单</text>
+          <text>正在匹配符合"{{standard}}"要求的陪玩</text>
+        </view>
+        <view class="timeline-step {{progressIndex > 2 ? 'done' : ''}} {{progressIndex === 2 ? 'current' : ''}}">
+          <text class="strong">开始服务</text>
+          <text>陪玩到位后由平台更新进度</text>
+        </view>
+        <view class="timeline-step {{progressIndex === 3 ? 'current' : ''}}">
+          <text class="strong">完成并评价</text>
+          <text>真实评价将计入服务评分</text>
+        </view>
       </view>
     </view>
-  </view>
 
-  <view class="card form-card">
-    <view class="h2" style="font-size:32rpx">下单快照</view>
-    <view class="row between">
-      <text class="muted">订单号</text>
-      <view class="row">
-        <text class="strong mono">{{order.orderNo}}</text>
-        <text class="link" hover-class="link-hover" bindtap="copyOrderNo">复制</text>
+    <!-- 操作日志时间线 -->
+    <view class="card pad" wx:if="{{timeline.length > 0}}">
+      <view class="h2" style="font-size:32rpx;margin-bottom:32rpx">操作记录</view>
+      <view class="timeline">
+        <view class="timeline-step" wx:for="{{timeline}}" wx:key="createdAt">
+          <text class="strong">{{item.customerMessage}}</text>
+          <text class="muted">{{item.createdAt}}</text>
+        </view>
       </view>
     </view>
-    <view class="row between"><text class="muted">套餐</text><text class="strong">{{order.title}}</text></view>
-    <view class="row between"><text class="muted">数量</text><text class="strong">{{order.qty}} {{order.unit}}</text></view>
-    <view class="row between"><text class="muted">服务标准</text><text class="strong">{{order.standard}}</text></view>
-    <view class="row between"><text class="muted">平台 / 区服</text><text class="strong">{{order.platform}} / {{order.server}}</text></view>
-    <view class="row between"><text class="muted">游戏 ID</text><text class="strong mono">已脱敏</text></view>
-    <view class="row between"><text class="muted">实付</text><text class="strong price">¥{{order.total}}</text></view>
-  </view>
 
-  <view class="grid-2">
-    <view class="btn btn-secondary" hover-class="btn-hover" bindtap="openRefund">申请退款</view>
-    <view class="btn btn-secondary" hover-class="btn-hover" bindtap="goComplaint">发起投诉</view>
-    <view class="btn btn-secondary" hover-class="btn-hover" bindtap="openReview">评价服务</view>
-    <button class="btn btn-primary contact-button" hover-class="btn-hover" open-type="contact">联系客服</button>
+    <!-- 下单快照 -->
+    <view class="card form-card">
+      <view class="h2" style="font-size:32rpx">下单快照</view>
+      <view class="row between">
+        <text class="muted">订单号</text>
+        <view class="row">
+          <text class="strong mono">{{orderNo}}</text>
+          <text class="link" hover-class="link-hover" bindtap="copyOrderNo">复制</text>
+        </view>
+      </view>
+      <view class="row between"><text class="muted">套餐</text><text class="strong">{{title}}</text></view>
+      <view class="row between"><text class="muted">数量</text><text class="strong">{{quantity}} {{unit}}</text></view>
+      <view class="row between" wx:if="{{standard}}"><text class="muted">服务标准</text><text class="strong">{{standard}}</text></view>
+      <view class="row between" wx:if="{{platform}}"><text class="muted">平台 / 区服</text><text class="strong">{{platform}} / {{server}}</text></view>
+      <view class="row between"><text class="muted">游戏 ID</text><text class="strong mono">已脱敏</text></view>
+      <view class="row between"><text class="muted">实付</text><text class="strong price">¥{{payableYuan}}</text></view>
+    </view>
+
+    <!-- 操作按钮 -->
+    <view class="grid-2">
+      <block wx:for="{{actions}}" wx:key="type">
+        <button
+          wx:if="{{item.type === 'contact'}}"
+          class="btn btn-primary contact-button"
+          hover-class="btn-hover"
+          open-type="contact"
+        >{{item.text}}</button>
+        <view
+          wx:else
+          class="btn {{item.primary ? 'btn-primary' : 'btn-secondary'}}"
+          hover-class="btn-hover"
+          bindtap="handleAction"
+          data-type="{{item.type}}"
+        >{{item.text}}</view>
+      </block>
+    </view>
+  </block>
+</view>
+
+<!-- 异议弹窗 -->
+<view class="modal-backdrop {{disputeOpen ? 'open' : ''}}" bindtap="closeDispute" catchtouchmove="noop">
+  <view class="sheet" catchtap="noop">
+    <view class="sheet-handle"></view>
+    <view class="h2">提出异议</view>
+    <view class="p muted">请描述服务中的问题，平台将在 24 小时内处理。</view>
+    <view class="field" style="margin-top:28rpx">
+      <view class="label">异议原因</view>
+      <input
+        class="input"
+        placeholder="如：服务质量不达标"
+        placeholder-class="ph-paper"
+        value="{{disputeReason}}"
+        bindinput="onDisputeReasonInput"
+      />
+    </view>
+    <textarea
+      class="textarea"
+      style="margin-top:28rpx"
+      placeholder="详细描述异议情况（选填）"
+      placeholder-class="ph-paper"
+      value="{{disputeDescription}}"
+      bindinput="onDisputeDescInput"
+    ></textarea>
+    <view class="row" style="margin-top:28rpx">
+      <view class="btn btn-secondary" hover-class="btn-hover" bindtap="closeDispute">取消</view>
+      <view class="btn btn-primary" hover-class="btn-hover" bindtap="submitDispute">提交异议</view>
+    </view>
   </view>
 </view>
 
+<!-- 退款弹窗（占位） -->
 <view class="modal-backdrop {{refundOpen ? 'open' : ''}}" bindtap="closeRefund" catchtouchmove="noop">
   <view class="dialog" catchtap="noop">
     <view class="h2">申请退款</view>
@@ -68,6 +133,7 @@
   </view>
 </view>
 
+<!-- 评价弹窗（占位） -->
 <view class="modal-backdrop {{reviewOpen ? 'open' : ''}}" bindtap="closeReview" catchtouchmove="noop">
   <view class="sheet" catchtap="noop">
     <view class="sheet-handle"></view>

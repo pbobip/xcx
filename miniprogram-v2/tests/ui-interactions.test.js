@@ -292,28 +292,20 @@ test('我的订单快捷入口会把所选状态带到订单页', () => {
   orders.page.onShow();
 
   assert.equal(orders.page.data.activeTab, '进行中');
+  assert.equal(orders.page.data.activeTabKey, 'inProgress');
   assert.equal(orders.storage.has('bbx_pending_tab_state'), false);
 });
 
-test('订单列表中的演示订单具有不同订单号和服务信息', () => {
+test('订单列表初始为空，数据由云端加载', () => {
   const orders = loadPage('pages/orders/orders.js');
-  const orderNumbers = orders.page.data.orders.map((order) => order.orderNo);
-  const titles = orders.page.data.orders.map((order) => order.title);
-
-  assert.equal(new Set(orderNumbers).size, orderNumbers.length);
-  assert.equal(new Set(titles).size, titles.length);
+  assert.deepEqual(orders.page.data.orders, []);
+  assert.equal(orders.page.data.empty, false);
+  assert.equal(typeof orders.page.loadOrders, 'function');
+  assert.equal(typeof orders.page.loadSummary, 'function');
 });
 
-test('点击订单后，详情页读取对应订单而不是固定演示订单', () => {
-  const orders = loadPage('pages/orders/orders.js');
-
-  orders.page.goOrderDetail({ currentTarget: { dataset: { index: 1 } } });
-
-  const selected = orders.storage.get('bbx_selected_order');
-  assert.equal(selected.orderNo, 'BBX-20260726-002');
-
+test('订单详情页通过 URL 参数 orderNo 从云端加载', () => {
   const detail = loadPage('pages/order-detail/order-detail.js', {
-    bbx_selected_order: selected,
     bbx_current_user: {
       id: 'users-test',
       platformUserNo: 'BBX-TEST',
@@ -321,11 +313,14 @@ test('点击订单后，详情页读取对应订单而不是固定演示订单',
       avatarFileId: null
     }
   });
-  detail.page.onLoad();
+  detail.page.onLoad({ orderNo: 'BBX-20260727-182734-ERI36I' });
 
-  assert.equal(detail.page.data.order.orderNo, 'BBX-20260726-002');
-  assert.equal(detail.page.data.order.title, '钻石段位娱乐陪');
-  assert.equal(detail.page.data.progressIndex, 2);
+  // 验证调用了 order.detail 云函数
+  const detailCall = detail.calls.find(
+    (c) => c.type === 'callFunction' && c.data && c.data.action === 'detail'
+  );
+  assert.ok(detailCall, '应该调用 order.detail 云函数');
+  assert.equal(detailCall.data.payload.orderNo, 'BBX-20260727-182734-ERI36I');
 });
 
 test('首页云端推荐卡打开与卡片文案一致的技术陪套餐', async () => {

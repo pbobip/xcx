@@ -198,6 +198,397 @@ function publicOrder(record) {
   };
 }
 
+async function handleQuoteAndCreate({ db, user, event, payload, requestId, now, createOrderNo }) {
+  let createRequestHash = null;
+  if (event.action === 'create') {
+    if (!event.idempotencyKey || typeof event.idempotencyKey !== 'string') {
+      return failure('INVALID_ARGUMENT', '缺少重复提交保护标识', requestId);
+    }
+    createRequestHash = requestHash(
+      payload.serviceId,
+      Number(payload.quantity),
+      payload.orderValues && typeof payload.orderValues === 'object'
+        ? payload.orderValues
+        : {}
+    );
+    const existingResult = await db.collection('orders')
+      .where({ userId: user._id, idempotencyKey: event.idempotencyKey })
+      .limit(1)
+      .get();
+    const existing = existingResult.data[0];
+    if (existing) {
+      if (existing.requestHash !== createRequestHash) {
+        return failure('DUPLICATE_REQUEST', '重复提交内容与原请求不一致', requestId);
+      }
+      return {
+        success: true,
+        data: { order: publicOrder(existing), reused: true },
+        requestId
+      };
+    }
+  }
+
+  const service = await activeService(db, payload.serviceId);
+  if (!service || service.status === 'OFFLINE' || service.status === 'DRAFT') {
+    return failure('SERVICE_OFFLINE', '服务套餐不存在或已下架', requestId);
+  }
+  if (service.status !== 'ACTIVE') {
+    return failure('SERVICE_PAUSED', '服务套餐当前暂停接单', requestId);
+  }
+  const quantity = validateQuantity(service, payload.quantity);
+  if (quantity === null) {
+    return failure('INVALID_ARGUMENT', '购买数量超出套餐允许范围', requestId);
+  }
+  const quote = quoteFor(service, quantity);
+  if (!quote) return failure('INVALID_ARGUMENT', '套餐价格配置无效', requestId);
+
+  if (event.action === 'quote') {
+    return { success: true, data: { quote }, requestId };
+  }
+  const validated = validateOrderValues(service, payload.orderValues);
+  if (validated.sensitive) {
+    return failure('SENSITIVE_CONTENT', '输入包含密码、验证码或证件等敏感信息', requestId);
+  }
+  if (validated.error) return failure('INVALID_ARGUMENT', validated.error, requestId);
+
+  const timestamp = now();
+  const orderValues = validated.values;
+  const snapshot = snapshotFor(service, quote, orderValues);
+  const record = {
+    orderNo: createOrderNo(timestamp),
+    userId: user._id,
+    serviceId: service._id,
+    snapshot,
+    quantity,
+    unitPriceCents: quote.unitPriceCents,
+    originalAmountCents: quote.originalAmountCents,
+    discountAmountCents: 0,
+    payableAmountCents: quote.payableAmountCents,
+    paidAmountCents: 0,
+    refundedAmountCents: 0,
+    userCouponId: null,
+    orderValues,
+    serviceMode: orderValues.serviceMode,
+    scheduledAt: orderValues.serviceMode === 'RESERVATION'
+      ? new Date(orderValues.scheduledAt)
+      : null,
+    customerNote: orderValues.customerNote || '',
+    paymentStatus: 'UNPAID',
+    fulfillmentStatus: 'NOT_STARTED',
+    afterSalesStatus: 'NONE',
+    assignedStaffId: null,
+    paidAt: null,
+    startedAt: null,
+    completedAt: null,
+    closedAt: null,
+    idempotencyKey: event.idempotencyKey,
+    requestHash: createRequestHash,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    version: 1,
+    isTest: service.isTest === true
+  };
+
+  const outcome = await db.runTransaction(async (transaction) => {
+    const orders = transaction.collection('orders');
+    const existingResult = await orders
+      .where({ userId: user._id, idempotencyKey: event.idempotencyKey })
+      .limit(1)
+      .get();
+    const existing = existingResult.data[0];
+    if (existing) {
+      if (existing.requestHash !== createRequestHash) return { conflict: true };
+      return { order: publicOrder(existing), reused: true };
+    }
+
+    const created = await orders.add({ data: record });
+    const saved = Object.assign({ _id: created._id }, record);
+    await transaction.collection('order_logs').add({
+      data: {
+        orderId: created._id,
+        orderNo: record.orderNo,
+        action: 'CREATE',
+        statusDimension: 'PAYMENT',
+        fromStatus: null,
+        toStatus: 'UNPAID',
+        actorType: 'CUSTOMER',
+        actorId: user._id,
+        customerVisible: true,
+        customerMessage: '服务订单已创建，等待付款',
+        internalReason: '',
+        requestId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        version: 1,
+        isTest: service.isTest === true
+      }
+    });
+    return { order: publicOrder(saved), reused: false };
+  });
+
+  if (outcome.conflict) {
+    return failure('DUPLICATE_REQUEST', '重复提交内容与原请求不一致', requestId);
+  }
+  return {
+    success: true,
+    data: { order: outcome.order, reused: outcome.reused },
+    requestId
+  };
+}
+
+async function handleSummary({ db, _, user, requestId }) {
+  const counts = { all: 0, unpaid: 0, waiting: 0, inProgress: 0, completed: 0 };
+  
+  counts.all = (await db.collection('orders').where({ userId: user._id }).count()).total;
+  counts.unpaid = (await db.collection('orders').where({
+    userId: user._id,
+    paymentStatus: 'UNPAID',
+    fulfillmentStatus: 'NOT_STARTED'
+  }).count()).total;
+  counts.waiting = (await db.collection('orders').where({
+    userId: user._id,
+    paymentStatus: 'PAID',
+    fulfillmentStatus: _.in(['PENDING_ASSIGNMENT', 'WAITING_START'])
+  }).count()).total;
+  counts.inProgress = (await db.collection('orders').where({
+    userId: user._id,
+    fulfillmentStatus: _.in(['IN_SERVICE', 'WAITING_CONFIRMATION'])
+  }).count()).total;
+  counts.completed = (await db.collection('orders').where({
+    userId: user._id,
+    fulfillmentStatus: 'COMPLETED'
+  }).count()).total;
+
+  return { success: true, data: { counts }, requestId };
+}
+
+async function handleList({ db, _, user, payload, requestId }) {
+  const { tab, cursor, limit = 10 } = payload;
+  const query = { userId: user._id };
+  
+  if (tab === 'unpaid') {
+    query.paymentStatus = 'UNPAID';
+    query.fulfillmentStatus = 'NOT_STARTED';
+  } else if (tab === 'waiting') {
+    query.paymentStatus = 'PAID';
+    query.fulfillmentStatus = _.in(['PENDING_ASSIGNMENT', 'WAITING_START']);
+  } else if (tab === 'inProgress') {
+    query.fulfillmentStatus = _.in(['IN_SERVICE', 'WAITING_CONFIRMATION']);
+  } else if (tab === 'completed') {
+    query.fulfillmentStatus = 'COMPLETED';
+  }
+
+  const result = await db.collection('orders').where(query).orderBy('createdAt', 'desc').get();
+  let items = result.data;
+  
+  if (cursor) {
+    const idx = items.findIndex(item => item._id === cursor);
+    if (idx !== -1) items = items.slice(idx + 1);
+  }
+  
+  const hasMore = items.length > limit;
+  items = items.slice(0, limit);
+  
+  const orders = items.map(record => ({
+    id: record._id,
+    orderNo: record.orderNo,
+    serviceId: record.serviceId,
+    serviceName: record.snapshot.service.name,
+    serviceCode: record.snapshot.service.code,
+    quantity: record.quantity,
+    payableAmountCents: record.payableAmountCents,
+    paymentStatus: record.paymentStatus,
+    fulfillmentStatus: record.fulfillmentStatus,
+    afterSalesStatus: record.afterSalesStatus,
+    createdAt: record.createdAt,
+    version: record.version
+  }));
+  
+  const nextCursor = hasMore ? items[items.length - 1]._id : null;
+  return { success: true, data: { orders, nextCursor }, requestId };
+}
+
+function getAvailableActions(record) {
+  const actions = ['contact'];
+  const p = record.paymentStatus;
+  const f = record.fulfillmentStatus;
+  const a = record.afterSalesStatus;
+  
+  if (p === 'UNPAID' && f === 'NOT_STARTED') actions.push('cancel', 'pay');
+  if (p === 'PAID' && ['PENDING_ASSIGNMENT', 'WAITING_START'].includes(f)) actions.push('refund');
+  if (f === 'IN_SERVICE') actions.push('complaint');
+  if (f === 'WAITING_CONFIRMATION' && a !== 'PROCESSING') actions.push('confirm', 'dispute');
+  if (f === 'COMPLETED') actions.push('review', 'rebuy');
+  
+  return actions;
+}
+
+async function handleDetail({ db, user, payload, requestId }) {
+  const { orderId, orderNo } = payload;
+  const query = { userId: user._id };
+  if (orderId) query._id = orderId;
+  else if (orderNo) query.orderNo = orderNo;
+  else return failure('INVALID_ARGUMENT', '必须提供订单ID或订单号', requestId);
+
+  const result = await db.collection('orders').where(query).limit(1).get();
+  const record = result.data[0];
+  if (!record) return failure('NOT_FOUND', '服务订单不存在', requestId);
+
+  const logsResult = await db.collection('order_logs').where({ orderId: record._id, customerVisible: true }).orderBy('createdAt', 'desc').get();
+  
+  return {
+    success: true,
+    data: {
+      order: publicOrder(record),
+      timeline: logsResult.data.map(log => ({
+        action: log.action,
+        message: log.customerMessage,
+        createdAt: log.createdAt
+      })),
+      actions: getAvailableActions(record)
+    },
+    requestId
+  };
+}
+
+async function handleCancel({ db, user, payload, requestId, now }) {
+  const { orderId, reason, version } = payload;
+  const timestamp = now();
+  
+  return await db.runTransaction(async (transaction) => {
+    const orders = transaction.collection('orders');
+    const result = await orders.doc(orderId).get();
+    const record = result.data;
+    
+    if (!record || record.userId !== user._id) return failure('NOT_FOUND', '服务订单不存在', requestId);
+    if (record.version !== version) return failure('CONFLICT', '订单状态已更新，请刷新后重试', requestId);
+    if (record.paymentStatus !== 'UNPAID' || record.fulfillmentStatus !== 'NOT_STARTED') {
+      return failure('PAYMENT_STATUS_CONFLICT', '订单当前状态不允许取消', requestId);
+    }
+    
+    await orders.doc(orderId).update({
+      data: {
+        paymentStatus: 'CLOSED',
+        fulfillmentStatus: 'CANCELLED',
+        closedAt: timestamp,
+        version: version + 1,
+        updatedAt: timestamp
+      }
+    });
+    
+    const logs = transaction.collection('order_logs');
+    await logs.add({
+      data: {
+        orderId, orderNo: record.orderNo,
+        action: 'CANCEL', statusDimension: 'PAYMENT',
+        fromStatus: 'UNPAID', toStatus: 'CLOSED',
+        actorType: 'CUSTOMER', actorId: user._id,
+        customerVisible: true, customerMessage: '订单已取消关闭',
+        internalReason: reason || '', requestId,
+        createdAt: timestamp, updatedAt: timestamp, version: 1, isTest: record.isTest
+      }
+    });
+    await logs.add({
+      data: {
+        orderId, orderNo: record.orderNo,
+        action: 'CANCEL', statusDimension: 'FULFILLMENT',
+        fromStatus: 'NOT_STARTED', toStatus: 'CANCELLED',
+        actorType: 'CUSTOMER', actorId: user._id,
+        customerVisible: false, customerMessage: '',
+        internalReason: reason || '', requestId,
+        createdAt: timestamp, updatedAt: timestamp, version: 1, isTest: record.isTest
+      }
+    });
+    
+    const updated = await orders.doc(orderId).get();
+    return { success: true, data: { order: publicOrder(updated.data) }, requestId };
+  });
+}
+
+async function handleConfirm({ db, user, payload, requestId, now }) {
+  const { orderId, version } = payload;
+  const timestamp = now();
+  
+  return await db.runTransaction(async (transaction) => {
+    const orders = transaction.collection('orders');
+    const result = await orders.doc(orderId).get();
+    const record = result.data;
+    
+    if (!record || record.userId !== user._id) return failure('NOT_FOUND', '服务订单不存在', requestId);
+    if (record.version !== version) return failure('CONFLICT', '订单状态已更新，请刷新后重试', requestId);
+    if (record.fulfillmentStatus !== 'WAITING_CONFIRMATION') {
+      return failure('FULFILLMENT_STATUS_CONFLICT', '订单当前状态不允许确认完成', requestId);
+    }
+    if (record.afterSalesStatus === 'PROCESSING') {
+      return failure('AFTER_SALES_STATUS_CONFLICT', '售后处理中，无法确认完成', requestId);
+    }
+    
+    await orders.doc(orderId).update({
+      data: {
+        fulfillmentStatus: 'COMPLETED',
+        completedAt: timestamp,
+        version: version + 1,
+        updatedAt: timestamp
+      }
+    });
+    
+    await transaction.collection('order_logs').add({
+      data: {
+        orderId, orderNo: record.orderNo,
+        action: 'CONFIRM', statusDimension: 'FULFILLMENT',
+        fromStatus: 'WAITING_CONFIRMATION', toStatus: 'COMPLETED',
+        actorType: 'CUSTOMER', actorId: user._id,
+        customerVisible: true, customerMessage: '服务已确认完成',
+        internalReason: '', requestId,
+        createdAt: timestamp, updatedAt: timestamp, version: 1, isTest: record.isTest
+      }
+    });
+    
+    const updated = await orders.doc(orderId).get();
+    return { success: true, data: { order: publicOrder(updated.data) }, requestId };
+  });
+}
+
+async function handleDispute({ db, user, payload, requestId, now }) {
+  const { orderId, reason, description, version } = payload;
+  const timestamp = now();
+  
+  return await db.runTransaction(async (transaction) => {
+    const orders = transaction.collection('orders');
+    const result = await orders.doc(orderId).get();
+    const record = result.data;
+    
+    if (!record || record.userId !== user._id) return failure('NOT_FOUND', '服务订单不存在', requestId);
+    if (record.version !== version) return failure('CONFLICT', '订单状态已更新，请刷新后重试', requestId);
+    if (record.fulfillmentStatus !== 'WAITING_CONFIRMATION') {
+      return failure('FULFILLMENT_STATUS_CONFLICT', '订单当前状态不允许提起异议', requestId);
+    }
+    
+    await orders.doc(orderId).update({
+      data: {
+        afterSalesStatus: 'REQUESTED',
+        version: version + 1,
+        updatedAt: timestamp
+      }
+    });
+    
+    await transaction.collection('order_logs').add({
+      data: {
+        orderId, orderNo: record.orderNo,
+        action: 'DISPUTE', statusDimension: 'AFTER_SALES',
+        fromStatus: record.afterSalesStatus, toStatus: 'REQUESTED',
+        actorType: 'CUSTOMER', actorId: user._id,
+        customerVisible: true, customerMessage: '已发起服务异议',
+        internalReason: `${reason}: ${description}`, requestId,
+        createdAt: timestamp, updatedAt: timestamp, version: 1, isTest: record.isTest
+      }
+    });
+    
+    const updated = await orders.doc(orderId).get();
+    return { success: true, data: { order: publicOrder(updated.data) }, requestId };
+  });
+}
+
 function createOrderHandler({
   cloud,
   logger = console,
@@ -213,145 +604,29 @@ function createOrderHandler({
       const user = await currentCustomer(db, cloud);
       if (!user) return failure('UNAUTHENTICATED', '请先完成微信登录', requestId);
 
-      if (!['quote', 'create'].includes(event.action)) {
+      const _ = db.command || {
+        in: (arr) => ({ $in: arr }),
+        neq: (val) => ({ $neq: val }),
+        or: (arr) => ({ $or: arr })
+      };
+
+      const ACTIONS = { 
+        quote: handleQuoteAndCreate, 
+        create: handleQuoteAndCreate, 
+        summary: handleSummary, 
+        list: handleList, 
+        detail: handleDetail, 
+        cancel: handleCancel, 
+        confirm: handleConfirm, 
+        dispute: handleDispute 
+      };
+
+      const actionHandler = ACTIONS[event.action];
+      if (!actionHandler) {
         return failure('INVALID_ARGUMENT', '不支持的服务订单动作', requestId);
       }
 
-      let createRequestHash = null;
-      if (event.action === 'create') {
-        if (!event.idempotencyKey || typeof event.idempotencyKey !== 'string') {
-          return failure('INVALID_ARGUMENT', '缺少重复提交保护标识', requestId);
-        }
-        createRequestHash = requestHash(
-          payload.serviceId,
-          Number(payload.quantity),
-          payload.orderValues && typeof payload.orderValues === 'object'
-            ? payload.orderValues
-            : {}
-        );
-        const existingResult = await db.collection('orders')
-          .where({ userId: user._id, idempotencyKey: event.idempotencyKey })
-          .limit(1)
-          .get();
-        const existing = existingResult.data[0];
-        if (existing) {
-          if (existing.requestHash !== createRequestHash) {
-            return failure('DUPLICATE_REQUEST', '重复提交内容与原请求不一致', requestId);
-          }
-          return {
-            success: true,
-            data: { order: publicOrder(existing), reused: true },
-            requestId
-          };
-        }
-      }
-
-      const service = await activeService(db, payload.serviceId);
-      if (!service || service.status === 'OFFLINE' || service.status === 'DRAFT') {
-        return failure('SERVICE_OFFLINE', '服务套餐不存在或已下架', requestId);
-      }
-      if (service.status !== 'ACTIVE') {
-        return failure('SERVICE_PAUSED', '服务套餐当前暂停接单', requestId);
-      }
-      const quantity = validateQuantity(service, payload.quantity);
-      if (quantity === null) {
-        return failure('INVALID_ARGUMENT', '购买数量超出套餐允许范围', requestId);
-      }
-      const quote = quoteFor(service, quantity);
-      if (!quote) return failure('INVALID_ARGUMENT', '套餐价格配置无效', requestId);
-
-      if (event.action === 'quote') {
-        return { success: true, data: { quote }, requestId };
-      }
-      const validated = validateOrderValues(service, payload.orderValues);
-      if (validated.sensitive) {
-        return failure('SENSITIVE_CONTENT', '输入包含密码、验证码或证件等敏感信息', requestId);
-      }
-      if (validated.error) return failure('INVALID_ARGUMENT', validated.error, requestId);
-
-      const timestamp = now();
-      const orderValues = validated.values;
-      const snapshot = snapshotFor(service, quote, orderValues);
-      const record = {
-        orderNo: createOrderNo(timestamp),
-        userId: user._id,
-        serviceId: service._id,
-        snapshot,
-        quantity,
-        unitPriceCents: quote.unitPriceCents,
-        originalAmountCents: quote.originalAmountCents,
-        discountAmountCents: 0,
-        payableAmountCents: quote.payableAmountCents,
-        paidAmountCents: 0,
-        refundedAmountCents: 0,
-        userCouponId: null,
-        orderValues,
-        serviceMode: orderValues.serviceMode,
-        scheduledAt: orderValues.serviceMode === 'RESERVATION'
-          ? new Date(orderValues.scheduledAt)
-          : null,
-        customerNote: orderValues.customerNote || '',
-        paymentStatus: 'UNPAID',
-        fulfillmentStatus: 'NOT_STARTED',
-        afterSalesStatus: 'NONE',
-        assignedStaffId: null,
-        paidAt: null,
-        startedAt: null,
-        completedAt: null,
-        closedAt: null,
-        idempotencyKey: event.idempotencyKey,
-        requestHash: createRequestHash,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        version: 1,
-        isTest: service.isTest === true
-      };
-
-      const outcome = await db.runTransaction(async (transaction) => {
-        const orders = transaction.collection('orders');
-        const existingResult = await orders
-          .where({ userId: user._id, idempotencyKey: event.idempotencyKey })
-          .limit(1)
-          .get();
-        const existing = existingResult.data[0];
-        if (existing) {
-          if (existing.requestHash !== createRequestHash) return { conflict: true };
-          return { order: publicOrder(existing), reused: true };
-        }
-
-        const created = await orders.add({ data: record });
-        const saved = Object.assign({ _id: created._id }, record);
-        await transaction.collection('order_logs').add({
-          data: {
-            orderId: created._id,
-            orderNo: record.orderNo,
-            action: 'CREATE',
-            statusDimension: 'PAYMENT',
-            fromStatus: null,
-            toStatus: 'UNPAID',
-            actorType: 'CUSTOMER',
-            actorId: user._id,
-            customerVisible: true,
-            customerMessage: '服务订单已创建，等待付款',
-            internalReason: '',
-            requestId,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-            version: 1,
-            isTest: service.isTest === true
-          }
-        });
-        return { order: publicOrder(saved), reused: false };
-      });
-
-      if (outcome.conflict) {
-        return failure('DUPLICATE_REQUEST', '重复提交内容与原请求不一致', requestId);
-      }
-      return {
-        success: true,
-        data: { order: outcome.order, reused: outcome.reused },
-        requestId
-      };
+      return await actionHandler({ db, _, user, event, payload, requestId, now, createOrderNo });
     } catch (error) {
       logger.error('order action failed', {
         action: event.action || '',

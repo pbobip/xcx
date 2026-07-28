@@ -1,94 +1,164 @@
 const nav = require('../../utils/nav');
 const store = require('../../utils/store');
 const auth = require('../../utils/auth');
+const { TABS, orderCardSummary } = require('../../utils/order-status');
 
-const DEMO_ORDERS = [
-  {
-    id: 'BBX-20260726-001',
-    orderNo: 'BBX-20260726-001',
-    status: '待服务',
-    code: 'PRO',
-    label: '技术陪',
-    title: '钻石段位技术陪',
-    summary: '1 局 · 无畏契约国服',
-    qty: 1,
-    unit: '局',
-    standard: '白金或人前五',
-    platform: '电脑端',
-    server: '无畏契约国服',
-    total: 35
-  },
-  {
-    id: 'BBX-20260726-002',
-    orderNo: 'BBX-20260726-002',
-    status: '进行中',
-    code: 'FUN',
-    label: '娱乐陪',
-    title: '钻石段位娱乐陪',
-    summary: '1 局 · 无畏契约国服',
-    qty: 1,
-    unit: '局',
-    standard: '轻松组队，以娱乐体验为主',
-    platform: '电脑端',
-    server: '无畏契约国服',
-    total: 25
-  },
-  {
-    id: 'BBX-20260726-003',
-    orderNo: 'BBX-20260726-003',
-    status: '已完成',
-    code: 'SWEET',
-    label: '甜蜜单',
-    title: '甜蜜单陪玩',
-    summary: '1 小时 · 无畏契约国服',
-    qty: 1,
-    unit: '小时',
-    standard: '可以指定称呼',
-    platform: '电脑端',
-    server: '无畏契约国服',
-    total: 52
-  }
-];
+const PAGE_SIZE = 20;
 
 Page({
   data: {
-    tabs: ['全部', '待付款', '待服务', '进行中', '已完成'],
+    tabs: TABS.map((tab) => tab.name),
     activeTab: '全部',
-    orders: DEMO_ORDERS,
-    empty: false
+    activeTabKey: 'all',
+    orders: [],
+    empty: false,
+    loading: false,
+    noMore: false,
+    counts: { all: 0, unpaid: 0, waiting: 0, inProgress: 0, completed: 0 }
   },
 
-  onLoad() {
+  _cursor: null,
+
+  onLoad(options) {
     auth.requireLogin('orders', 'back');
+    // 支持从"我的"页面跳转时指定标签
+    if (options && options.tab) {
+      const tab = TABS.find((t) => t.key === options.tab || t.name === options.tab);
+      if (tab) this.setData({ activeTab: tab.name, activeTabKey: tab.key });
+    }
   },
 
   onShow() {
     const pendingStatus = store.popPendingTabState();
-    if (pendingStatus && this.data.tabs.includes(pendingStatus)) {
-      this.selectTab(pendingStatus);
+    if (pendingStatus) {
+      const tab = TABS.find((t) => t.name === pendingStatus || t.key === pendingStatus);
+      if (tab) this.setData({ activeTab: tab.name, activeTabKey: tab.key });
     }
+    this.loadSummary();
+    this.resetAndLoad();
+  },
+
+  onPullDownRefresh() {
+    this.loadSummary();
+    this.resetAndLoad().then(() => wx.stopPullDownRefresh());
+  },
+
+  onReachBottom() {
+    if (!this._cursor || this.data.noMore || this.data.loading) return;
+    this.loadOrders(this._cursor);
   },
 
   onTab(e) {
-    this.selectTab(e.currentTarget.dataset.status);
+    const name = e.currentTarget.dataset.status;
+    const tab = TABS.find((t) => t.name === name);
+    if (!tab || tab.name === this.data.activeTab) return;
+    this.setData({ activeTab: tab.name, activeTabKey: tab.key });
+    this.resetAndLoad();
   },
 
-  selectTab(status) {
-    const count = this.data.orders.filter(
-      (order) => status === '全部' || order.status === status
-    ).length;
-    this.setData({ activeTab: status, empty: count === 0 });
+  loadSummary() {
+    wx.cloud.callFunction({
+      name: 'order',
+      data: { action: 'summary', payload: {} }
+    }).then((res) => {
+      if (res.result && res.result.success) {
+        this.setData({ counts: res.result.data.counts });
+      }
+    }).catch(() => {});
   },
 
-  goServiceDetail(e) {
-    const order = this.data.orders[Number(e.currentTarget.dataset.index)];
-    store.setSelectedService({ code: order ? order.code : 'PRO', source: 'orders' });
-    nav.go('service-detail');
+  resetAndLoad() {
+    this._cursor = null;
+    this.setData({ orders: [], empty: false, noMore: false });
+    return this.loadOrders(null);
+  },
+
+  loadOrders(cursor) {
+    if (this.data.loading) return Promise.resolve();
+    this.setData({ loading: true });
+
+    return wx.cloud.callFunction({
+      name: 'order',
+      data: {
+        action: 'list',
+        payload: {
+          tab: this.data.activeTabKey,
+          cursor: cursor || null,
+          limit: PAGE_SIZE
+        }
+      }
+    }).then((res) => {
+      if (!res.result || !res.result.success) {
+        nav.toast('加载失败，请重试');
+        this.setData({ loading: false });
+        return;
+      }
+      const newOrders = (res.result.data.orders || []).map(orderCardSummary);
+      const allOrders = cursor ? this.data.orders.concat(newOrders) : newOrders;
+      this._cursor = res.result.data.nextCursor;
+      this.setData({
+        orders: allOrders,
+        empty: allOrders.length === 0,
+        noMore: !res.result.data.nextCursor,
+        loading: false
+      });
+    }).catch(() => {
+      nav.toast('网络异常，请重试');
+      this.setData({ loading: false });
+    });
   },
 
   goOrderDetail(e) {
-    const order = this.data.orders[Number(e.currentTarget.dataset.index)];
-    if (order) store.setSelectedOrder(order);
-    nav.go('order-detail');
+    const orderNo = e.currentTarget.dataset.orderno;
+    if (orderNo) {
+      wx.navigateTo({ url: `/pages/order-detail/order-detail?orderNo=${orderNo}` });
+    }
+  },
+
+  handleAction(e) {
+    const { type, orderno, orderid } = e.currentTarget.dataset;
+    if (type === 'cancel') {
+      this.cancelOrder(orderid, orderno);
+    } else if (type === 'pay' || type === 'refund' || type === 'review' || type === 'rebuy' || type === 'complaint') {
+      nav.toast('该功能即将接入');
+    } else if (type === 'confirm' || type === 'dispute') {
+      wx.navigateTo({ url: `/pages/order-detail/order-detail?orderNo=${orderno}` });
+    }
+  },
+
+  cancelOrder(orderId, orderNo) {
+    wx.showModal({
+      title: '确认取消',
+      content: `确定要取消订单 ${orderNo || ''} 吗？`,
+      confirmText: '确认取消',
+      cancelText: '暂不取消',
+      success: (res) => {
+        if (!res.confirm) return;
+        // 查找订单的 version
+        const order = this.data.orders.find((o) => o.id === orderId);
+        wx.cloud.callFunction({
+          name: 'order',
+          data: {
+            action: 'cancel',
+            payload: {
+              orderId,
+              reason: '顾客主动取消',
+              version: order ? order.version : 1
+            }
+          }
+        }).then((result) => {
+          if (result.result && result.result.success) {
+            nav.toast('订单已取消');
+            this.loadSummary();
+            this.resetAndLoad();
+          } else {
+            const msg = result.result && result.result.error
+              ? result.result.error.message
+              : '取消失败，请重试';
+            nav.toast(msg);
+          }
+        }).catch(() => nav.toast('网络异常，请重试'));
+      }
+    });
   }
 });

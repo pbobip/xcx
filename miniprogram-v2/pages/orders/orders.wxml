@@ -10,40 +10,72 @@
     >{{item}}</view>
   </view>
 
-  <view>
+  <!-- 加载中 -->
+  <view class="loading-hint" wx:if="{{loading && orders.length === 0}}">
+    <text class="muted">加载中…</text>
+  </view>
+
+  <!-- 订单列表 -->
+  <view wx:if="{{orders.length > 0}}">
     <view
       wx:for="{{orders}}"
       wx:key="id"
       class="order-card card"
-      hidden="{{activeTab !== '全部' && item.status !== activeTab}}"
+      hover-class="card-press"
+      bindtap="goOrderDetail"
+      data-orderno="{{item.orderNo}}"
     >
       <view class="row between">
         <text class="meta muted">爆爆熊订单 {{item.orderNo}}</text>
-        <text class="status {{item.status === '待服务' ? 'warn' : ''}}">{{item.status}}</text>
+        <text class="status {{item.tab === 'waiting' ? 'warn' : ''}}">{{item.statusText}}</text>
       </view>
-      <view class="service-card card" hover-class="card-press" bindtap="goServiceDetail" data-index="{{index}}">
+      <view class="service-card card">
         <view class="cover"><text>{{item.code}}</text></view>
         <view class="service-copy">
-          <text class="tag">{{item.label}}</text>
           <view class="h3">{{item.title}}</view>
-          <view class="p">{{item.summary}}</view>
+          <view class="p">{{item.quantity}} {{item.unit}}</view>
           <view class="row between">
             <text class="old-price">爆爆熊电竞</text>
-            <text class="price">¥{{item.total}}</text>
+            <text class="price">¥{{item.payableYuan}}</text>
           </view>
         </view>
       </view>
-      <view class="row between">
-        <text class="muted">实付：¥{{item.total}}</text>
+      <view class="row between" catchtap="">
+        <text class="muted">实付：¥{{item.payableYuan}}</text>
         <view class="order-actions">
-          <button class="btn btn-secondary contact-button" hover-class="btn-hover" open-type="contact">联系客服</button>
-          <view class="btn btn-secondary" hover-class="btn-hover" bindtap="goOrderDetail" data-index="{{index}}">查看进度</view>
+          <block wx:for="{{item.actions}}" wx:for-item="action" wx:key="type">
+            <button
+              wx:if="{{action.type === 'contact'}}"
+              class="btn btn-secondary contact-button"
+              hover-class="btn-hover"
+              open-type="contact"
+              catchtap=""
+            >{{action.text}}</button>
+            <view
+              wx:else
+              class="btn {{action.primary ? 'btn-primary' : 'btn-secondary'}}"
+              hover-class="btn-hover"
+              catchtap="handleAction"
+              data-type="{{action.type}}"
+              data-orderno="{{item.orderNo}}"
+              data-orderid="{{item.id}}"
+            >{{action.text}}</view>
+          </block>
         </view>
       </view>
     </view>
   </view>
 
-  <view class="empty card" wx:if="{{empty}}">
+  <!-- 加载更多 -->
+  <view class="loading-hint" wx:if="{{loading && orders.length > 0}}">
+    <text class="muted">加载更多…</text>
+  </view>
+  <view class="loading-hint" wx:if="{{noMore && orders.length > 0}}">
+    <text class="muted">没有更多订单了</text>
+  </view>
+
+  <!-- 空状态 -->
+  <view class="empty card" wx:if="{{empty && !loading}}">
     <view>
       <view class="empty-mark"><view class="icon i-order"></view></view>
       <view class="h2">当前没有订单</view>
