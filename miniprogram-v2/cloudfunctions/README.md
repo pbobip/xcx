@@ -64,3 +64,27 @@ cloudfunctions/
 它使用固定文档 ID 写入 11 个模拟套餐，刷新原有 4 个无畏契约套餐的开发合规标记与复合搜索文本，更新 3 个互不重复的首页推荐位，并写入 1 条原创开发横幅，因此可以重复执行且不会产生重复记录。15 个套餐统一标记 `isTest = true`，销量和评价统计保持为空或零。
 
 只可将该函数临时部署到开发环境 `cloud1-d5gmfvq70c644d633`。执行成功并通过 `catalog` 读取验收后，应立即从云端删除该函数；源代码保留在仓库中用于重新初始化。正式环境不得部署或调用。
+
+## `payment` 微信支付云函数
+
+`payment` 按普通直连商户模式接入微信支付 APIv3，提供：
+
+- `prepay.create`、`query`、`close`；
+- `refund.request`、`refund.query`；
+- `reconcile.daily`；
+- 独立的 `/payment/notify` 与 `/refund/notify` HTTPS 路径。
+
+部署前建立 `payment_records`、`refund_records`、`reconciliation_records` 集合并设置为仅云函数可读写，同时按 `docs/database.md` 建立唯一索引。通知路径必须保留原始 HTTP Body，不能先解析再重新序列化。
+
+以下配置必须由授权人员直接写入云端安全配置，不得提交到版本库、普通数据库或前端：
+
+- `WECHAT_PAY_MCHID`
+- `WECHAT_PAY_MERCHANT_SERIAL_NO`
+- `WECHAT_PAY_PRIVATE_KEY`
+- `WECHAT_PAY_API_V3_KEY`
+- `WECHAT_PAY_PUBLIC_KEY_ID`
+- `WECHAT_PAY_PUBLIC_KEY`
+- `WECHAT_PAY_NOTIFY_URL`
+- `WECHAT_REFUND_NOTIFY_URL`
+
+可选的 `WECHAT_PAY_APPID` 默认使用项目 AppID `wx373cd5ed5680a30d`。正式配置缺失时云函数会拒绝启动真实支付，不会回退到测试付款。

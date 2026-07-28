@@ -798,6 +798,7 @@ test('顾客创建未付款服务订单并保存不可变下单快照', async ()
     payableAmountCents: 7000,
     userCouponId: null,
     paidAmountCents: 0,
+    refundedAmountCents: 0,
     paymentStatus: 'UNPAID',
     fulfillmentStatus: 'NOT_STARTED',
     afterSalesStatus: 'NONE',
@@ -1101,6 +1102,29 @@ test('取消未支付订单', async () => {
   assert.equal(success.data.order.paymentStatus, 'CLOSED');
   assert.equal(success.data.order.fulfillmentStatus, 'CANCELLED');
   assert.equal(success.data.order.version, 2);
+});
+
+test('存在预支付记录时普通取消必须转由支付模块先查单关单', async () => {
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    orders: [{
+      _id: 'o1', userId: 'user-a', orderNo: 'N1',
+      paymentStatus: 'UNPAID', fulfillmentStatus: 'NOT_STARTED', version: 1
+    }],
+    payment_records: [{
+      _id: 'p1', orderId: 'o1', outTradeNo: 'N1', status: 'PREPAY'
+    }],
+    order_logs: []
+  });
+  const main = createOrderHandler({ cloud });
+
+  const result = await main({
+    action: 'cancel', payload: { orderId: 'o1', reason: '顾客主动取消', version: 1 }
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.error.code, 'PAYMENT_CLOSE_REQUIRED');
 });
 
 test('确认完成服务', async () => {

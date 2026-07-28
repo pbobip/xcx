@@ -6,6 +6,12 @@
       <view class="p">{{copy}}</view>
       <view class="row" wx:if="{{order}}" style="justify-content:center;margin-top:44rpx">
         <view class="btn btn-secondary" hover-class="btn-hover" bindtap="onCopyOrderNo">复制订单号</view>
+        <view
+          wx:if="{{paymentState !== 'PAID'}}"
+          class="btn btn-primary {{paying ? 'disabled' : ''}}"
+          hover-class="{{paying ? 'none' : 'btn-hover'}}"
+          bindtap="onPay"
+        >{{paying ? '正在确认…' : paymentState === 'CANCELLED' || paymentState === 'FAILED' ? '重新支付' : '微信支付'}}</view>
         <view class="btn btn-primary" hover-class="btn-hover" bindtap="onViewOrder">查看订单</view>
       </view>
     </view>

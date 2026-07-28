@@ -1,4 +1,5 @@
 const nav = require('../../utils/nav');
+const payment = require('../../utils/payment');
 const store = require('../../utils/store');
 const auth = require('../../utils/auth');
 const { TABS, orderCardSummary } = require('../../utils/order-status');
@@ -152,8 +153,14 @@ Page({
               version: order ? order.version : 1
             }
           }
-        }).then((result) => {
+        }).then(async (result) => {
           if (result.result && result.result.success) {
+            nav.toast('订单已取消');
+            this.loadSummary();
+            this.resetAndLoad();
+          } else if (result.result && result.result.error
+            && result.result.error.code === 'PAYMENT_CLOSE_REQUIRED') {
+            await payment.call('close', { orderId, reason: '顾客主动取消' });
             nav.toast('订单已取消');
             this.loadSummary();
             this.resetAndLoad();
@@ -163,7 +170,7 @@ Page({
               : '取消失败，请重试';
             nav.toast(msg);
           }
-        }).catch(() => nav.toast('网络异常，请重试'));
+        }).catch((error) => nav.toast(error.message || '网络异常，请重试'));
       }
     });
   }

@@ -192,6 +192,7 @@ function publicOrder(record) {
     payableAmountCents: record.payableAmountCents,
     userCouponId: record.userCouponId || null,
     paidAmountCents: record.paidAmountCents,
+    refundedAmountCents: record.refundedAmountCents,
     paymentStatus: record.paymentStatus,
     fulfillmentStatus: record.fulfillmentStatus,
     afterSalesStatus: record.afterSalesStatus,
@@ -777,6 +778,19 @@ async function handleCancel({ db, user, payload, requestId, now }) {
     if (record.version !== version) return failure('CONFLICT', '订单状态已更新，请刷新后重试', requestId);
     if (record.paymentStatus !== 'UNPAID' || record.fulfillmentStatus !== 'NOT_STARTED') {
       return failure('PAYMENT_STATUS_CONFLICT', '订单当前状态不允许取消', requestId);
+    }
+
+    const paymentResult = await transaction.collection('payment_records')
+      .where({ orderId })
+      .limit(1)
+      .get();
+    const payment = paymentResult.data[0];
+    if (payment && payment.status !== 'CLOSED') {
+      return failure(
+        'PAYMENT_CLOSE_REQUIRED',
+        '该服务订单已创建微信预支付，请先查单并关闭支付',
+        requestId
+      );
     }
 
     if (record.userCouponId) {

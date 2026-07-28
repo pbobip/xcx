@@ -34,6 +34,18 @@ function loadPage(relativePath, seed = {}, options = {}) {
         };
       }
     },
+    requestPayment(params) {
+      calls.push({
+        type: 'requestPayment',
+        timeStamp: params.timeStamp,
+        nonceStr: params.nonceStr,
+        package: params.package,
+        signType: params.signType,
+        paySign: params.paySign
+      });
+      if (options.requestPayment) return options.requestPayment(params);
+      if (params.success) params.success({ errMsg: 'requestPayment:ok' });
+    },
     getStorageSync(key) {
       return storage.has(key) ? storage.get(key) : '';
     },
@@ -56,6 +68,10 @@ function loadPage(relativePath, seed = {}, options = {}) {
       calls.push({ type: 'reLaunch', url });
     },
     setClipboardData() {},
+    showModal(params) {
+      calls.push({ type: 'showModal', title: params.title });
+      if (params.success) params.success({ confirm: true, cancel: false });
+    },
     showToast() {}
   };
   global.getCurrentPages = () => [{}, {}];
@@ -654,15 +670,16 @@ test('首页云端推荐卡打开与卡片文案一致的技术陪套餐', async
   assert.equal(home.calls.at(-1).url, '/pages/service-detail/service-detail');
 });
 
-test('支付结果页不向顾客暴露测试状态切换器', () => {
+test('支付结果页不向顾客暴露测试状态切换器且只按云端查单显示结果', () => {
   const result = loadPage('pages/payment-result/payment-result.js');
   const source = readSource('pages/payment-result/payment-result.js');
 
   assert.equal(result.page.data.tabs, undefined);
   assert.equal(result.page.onStateTap, undefined);
   assert.doesNotMatch(source, /BBX-DEMO-001/);
-  assert.doesNotMatch(source, /支付成功/);
-  assert.match(source, /订单已创建/);
+  assert.match(source, /payment\.call\('query'/);
+  assert.match(source, /result\.order\.paymentStatus === 'PAID'/);
+  assert.match(source, /服务订单已创建/);
 });
 
 test('支付结果页查看订单时携带新建服务订单 ID', () => {
@@ -685,6 +702,95 @@ test('支付结果页查看订单时携带新建服务订单 ID', () => {
     type: 'navigateTo',
     url: '/pages/order-detail/order-detail?orderId=orders-1'
   });
+});
+
+test('支付结果页调起微信支付后只使用云端查单结果显示支付成功', async () => {
+  const result = loadPage('pages/payment-result/payment-result.js', {
+    bbx_current_user: { id: 'users-test' },
+    bbx_last_order: {
+      id: 'orders-1',
+      orderNo: 'BBX-20260728-000001',
+      title: '钻石段位技术陪',
+      qty: 1,
+      unit: '局',
+      total: 25,
+      paymentStatus: 'UNPAID'
+    }
+  }, {
+    cloudCall({ name, data }) {
+      assert.equal(name, 'payment');
+      if (data.action === 'prepay.create') {
+        return Promise.resolve({ result: {
+          success: true,
+          data: {
+            payment: { status: 'PREPAY' },
+            paymentParams: {
+              timeStamp: '1785254400', nonceStr: 'nonce-001',
+              package: 'prepay_id=wx-prepay-001', signType: 'RSA', paySign: 'signed-params'
+            }
+          }
+        } });
+      }
+      assert.equal(data.action, 'query');
+      return Promise.resolve({ result: {
+        success: true,
+        data: {
+          payment: { status: 'SUCCESS' },
+          order: {
+            id: 'orders-1', orderNo: 'BBX-20260728-000001',
+            paymentStatus: 'PAID', fulfillmentStatus: 'PENDING_ASSIGNMENT',
+            paidAmountCents: 2500
+          }
+        }
+      } });
+    }
+  });
+
+  result.page.onShow();
+  await result.page.onPay();
+
+  assert.equal(result.page.data.title, '支付成功');
+  assert.equal(result.page.data.paymentState, 'PAID');
+  assert.equal(result.storage.get('bbx_last_order').paymentStatus, 'PAID');
+  assert.equal(result.calls.some((call) => call.type === 'requestPayment'), true);
+  assert.deepEqual(
+    result.calls.filter((call) => call.type === 'callFunction').map((call) => call.data.action),
+    ['prepay.create', 'query']
+  );
+});
+
+test('订单详情取消已有预支付的服务订单时转由支付模块安全关单', async () => {
+  const result = loadPage('pages/order-detail/order-detail.js', {
+    bbx_current_user: { id: 'users-test' }
+  }, {
+    cloudCall({ name, data }) {
+      if (name === 'order' && data.action === 'cancel') {
+        return Promise.resolve({ result: {
+          success: false,
+          error: { code: 'PAYMENT_CLOSE_REQUIRED', message: '请先关闭支付' }
+        } });
+      }
+      assert.equal(name, 'payment');
+      assert.equal(data.action, 'close');
+      return Promise.resolve({ result: {
+        success: true,
+        data: { order: { id: 'orders-1', paymentStatus: 'CLOSED' } }
+      } });
+    }
+  });
+  result.page._orderId = 'orders-1';
+  result.page._orderNo = 'BBX-20260728-000001';
+  result.page._version = 1;
+  result.page.loadOrder = () => {};
+
+  result.page.cancelOrder();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(
+    result.calls.filter((call) => call.type === 'callFunction').map((call) => [call.name, call.data.action]),
+    [['order', 'cancel'], ['payment', 'close']]
+  );
 });
 
 test('关键页面保留防重叠布局约束', () => {
