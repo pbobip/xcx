@@ -8,16 +8,19 @@ const GUEST_USER = {
   avatarText: '熊'
 };
 
+const UNKNOWN_ORDER_QUICKS = [
+  { count: '—', label: '待付款', tab: 'unpaid' },
+  { count: '—', label: '待服务', tab: 'waiting' },
+  { count: '—', label: '进行中', tab: 'inProgress' },
+  { count: '—', label: '已完成', tab: 'completed' }
+];
+
 Page({
   data: {
     loggedIn: false,
     user: GUEST_USER,
-    quicks: [
-      { count: '0', label: '待付款', tab: 'unpaid' },
-      { count: '0', label: '待服务', tab: 'waiting' },
-      { count: '0', label: '进行中', tab: 'inProgress' },
-      { count: '0', label: '已完成', tab: 'completed' }
-    ]
+    quicks: UNKNOWN_ORDER_QUICKS,
+    orderCountsError: ''
   },
   onShow() {
     const currentUser = auth.getCurrentUser();
@@ -32,11 +35,15 @@ Page({
   },
 
   loadOrderCounts() {
-    wx.cloud.callFunction({
+    this.setData({ quicks: UNKNOWN_ORDER_QUICKS, orderCountsError: '' });
+    return wx.cloud.callFunction({
       name: 'order',
       data: { action: 'summary', payload: {} }
     }).then((res) => {
-      if (!res.result || !res.result.success) return;
+      if (!res.result || !res.result.success) {
+        this.setData({ orderCountsError: '订单数量加载失败，请进入订单页查看' });
+        return;
+      }
       const counts = res.result.data.counts;
       this.setData({
         quicks: [
@@ -44,9 +51,12 @@ Page({
           { count: String(counts.waiting || 0), label: '待服务', tab: 'waiting' },
           { count: String(counts.inProgress || 0), label: '进行中', tab: 'inProgress' },
           { count: String(counts.completed || 0), label: '已完成', tab: 'completed' }
-        ]
+        ],
+        orderCountsError: ''
       });
-    }).catch(() => {});
+    }).catch(() => {
+      this.setData({ orderCountsError: '订单数量加载失败，请进入订单页查看' });
+    });
   },
 
   goLogin() {

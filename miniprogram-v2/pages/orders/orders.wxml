@@ -15,6 +15,16 @@
     <text class="muted">加载中…</text>
   </view>
 
+  <!-- 失败状态 -->
+  <view class="empty card" wx:if="{{error && orders.length === 0 && !loading}}">
+    <view>
+      <view class="empty-mark"><view class="icon i-order"></view></view>
+      <view class="h2">订单暂时无法加载</view>
+      <view class="p">{{error}}</view>
+      <button class="btn btn-secondary state-button" bindtap="retry">重新加载</button>
+    </view>
+  </view>
+
   <!-- 订单列表 -->
   <view wx:if="{{orders.length > 0}}">
     <view
@@ -75,7 +85,7 @@
   </view>
 
   <!-- 空状态 -->
-  <view class="empty card" wx:if="{{empty && !loading}}">
+  <view class="empty card" wx:if="{{empty && !loading && !error}}">
     <view>
       <view class="empty-mark"><view class="icon i-order"></view></view>
       <view class="h2">当前没有订单</view>

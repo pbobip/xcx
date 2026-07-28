@@ -338,7 +338,7 @@ async function handleQuoteAndCreate({ db, user, event, payload, requestId, now, 
 
 async function handleSummary({ db, _, user, requestId }) {
   const counts = { all: 0, unpaid: 0, waiting: 0, inProgress: 0, completed: 0 };
-  
+
   counts.all = (await db.collection('orders').where({ userId: user._id }).count()).total;
   counts.unpaid = (await db.collection('orders').where({
     userId: user._id,
@@ -365,7 +365,7 @@ async function handleSummary({ db, _, user, requestId }) {
 async function handleList({ db, _, user, payload, requestId }) {
   const { tab, cursor, limit = 10 } = payload;
   const query = { userId: user._id };
-  
+
   if (tab === 'unpaid') {
     query.paymentStatus = 'UNPAID';
     query.fulfillmentStatus = 'NOT_STARTED';
@@ -380,15 +380,15 @@ async function handleList({ db, _, user, payload, requestId }) {
 
   const result = await db.collection('orders').where(query).orderBy('createdAt', 'desc').get();
   let items = result.data;
-  
+
   if (cursor) {
     const idx = items.findIndex(item => item._id === cursor);
     if (idx !== -1) items = items.slice(idx + 1);
   }
-  
+
   const hasMore = items.length > limit;
   items = items.slice(0, limit);
-  
+
   const orders = items.map(record => ({
     id: record._id,
     orderNo: record.orderNo,
@@ -403,7 +403,7 @@ async function handleList({ db, _, user, payload, requestId }) {
     createdAt: record.createdAt,
     version: record.version
   }));
-  
+
   const nextCursor = hasMore ? items[items.length - 1]._id : null;
   return { success: true, data: { orders, nextCursor }, requestId };
 }
@@ -413,13 +413,13 @@ function getAvailableActions(record) {
   const p = record.paymentStatus;
   const f = record.fulfillmentStatus;
   const a = record.afterSalesStatus;
-  
+
   if (p === 'UNPAID' && f === 'NOT_STARTED') actions.push('cancel', 'pay');
   if (p === 'PAID' && ['PENDING_ASSIGNMENT', 'WAITING_START'].includes(f)) actions.push('refund');
   if (f === 'IN_SERVICE') actions.push('complaint');
   if (f === 'WAITING_CONFIRMATION' && a !== 'PROCESSING') actions.push('confirm', 'dispute');
   if (f === 'COMPLETED') actions.push('review', 'rebuy');
-  
+
   return actions;
 }
 
@@ -435,7 +435,7 @@ async function handleDetail({ db, user, payload, requestId }) {
   if (!record) return failure('NOT_FOUND', '服务订单不存在', requestId);
 
   const logsResult = await db.collection('order_logs').where({ orderId: record._id, customerVisible: true }).orderBy('createdAt', 'desc').get();
-  
+
   return {
     success: true,
     data: {
@@ -454,18 +454,18 @@ async function handleDetail({ db, user, payload, requestId }) {
 async function handleCancel({ db, user, payload, requestId, now }) {
   const { orderId, reason, version } = payload;
   const timestamp = now();
-  
+
   return await db.runTransaction(async (transaction) => {
     const orders = transaction.collection('orders');
     const result = await orders.doc(orderId).get();
     const record = result.data;
-    
+
     if (!record || record.userId !== user._id) return failure('NOT_FOUND', '服务订单不存在', requestId);
     if (record.version !== version) return failure('CONFLICT', '订单状态已更新，请刷新后重试', requestId);
     if (record.paymentStatus !== 'UNPAID' || record.fulfillmentStatus !== 'NOT_STARTED') {
       return failure('PAYMENT_STATUS_CONFLICT', '订单当前状态不允许取消', requestId);
     }
-    
+
     await orders.doc(orderId).update({
       data: {
         paymentStatus: 'CLOSED',
@@ -475,7 +475,7 @@ async function handleCancel({ db, user, payload, requestId, now }) {
         updatedAt: timestamp
       }
     });
-    
+
     const logs = transaction.collection('order_logs');
     await logs.add({
       data: {
@@ -499,7 +499,7 @@ async function handleCancel({ db, user, payload, requestId, now }) {
         createdAt: timestamp, updatedAt: timestamp, version: 1, isTest: record.isTest
       }
     });
-    
+
     const updated = await orders.doc(orderId).get();
     return { success: true, data: { order: publicOrder(updated.data) }, requestId };
   });
@@ -508,12 +508,12 @@ async function handleCancel({ db, user, payload, requestId, now }) {
 async function handleConfirm({ db, user, payload, requestId, now }) {
   const { orderId, version } = payload;
   const timestamp = now();
-  
+
   return await db.runTransaction(async (transaction) => {
     const orders = transaction.collection('orders');
     const result = await orders.doc(orderId).get();
     const record = result.data;
-    
+
     if (!record || record.userId !== user._id) return failure('NOT_FOUND', '服务订单不存在', requestId);
     if (record.version !== version) return failure('CONFLICT', '订单状态已更新，请刷新后重试', requestId);
     if (record.fulfillmentStatus !== 'WAITING_CONFIRMATION') {
@@ -522,7 +522,7 @@ async function handleConfirm({ db, user, payload, requestId, now }) {
     if (record.afterSalesStatus === 'PROCESSING') {
       return failure('AFTER_SALES_STATUS_CONFLICT', '售后处理中，无法确认完成', requestId);
     }
-    
+
     await orders.doc(orderId).update({
       data: {
         fulfillmentStatus: 'COMPLETED',
@@ -531,7 +531,7 @@ async function handleConfirm({ db, user, payload, requestId, now }) {
         updatedAt: timestamp
       }
     });
-    
+
     await transaction.collection('order_logs').add({
       data: {
         orderId, orderNo: record.orderNo,
@@ -543,7 +543,7 @@ async function handleConfirm({ db, user, payload, requestId, now }) {
         createdAt: timestamp, updatedAt: timestamp, version: 1, isTest: record.isTest
       }
     });
-    
+
     const updated = await orders.doc(orderId).get();
     return { success: true, data: { order: publicOrder(updated.data) }, requestId };
   });
@@ -552,18 +552,18 @@ async function handleConfirm({ db, user, payload, requestId, now }) {
 async function handleDispute({ db, user, payload, requestId, now }) {
   const { orderId, reason, description, version } = payload;
   const timestamp = now();
-  
+
   return await db.runTransaction(async (transaction) => {
     const orders = transaction.collection('orders');
     const result = await orders.doc(orderId).get();
     const record = result.data;
-    
+
     if (!record || record.userId !== user._id) return failure('NOT_FOUND', '服务订单不存在', requestId);
     if (record.version !== version) return failure('CONFLICT', '订单状态已更新，请刷新后重试', requestId);
     if (record.fulfillmentStatus !== 'WAITING_CONFIRMATION') {
       return failure('FULFILLMENT_STATUS_CONFLICT', '订单当前状态不允许提起异议', requestId);
     }
-    
+
     await orders.doc(orderId).update({
       data: {
         afterSalesStatus: 'REQUESTED',
@@ -571,7 +571,7 @@ async function handleDispute({ db, user, payload, requestId, now }) {
         updatedAt: timestamp
       }
     });
-    
+
     await transaction.collection('order_logs').add({
       data: {
         orderId, orderNo: record.orderNo,
@@ -583,7 +583,7 @@ async function handleDispute({ db, user, payload, requestId, now }) {
         createdAt: timestamp, updatedAt: timestamp, version: 1, isTest: record.isTest
       }
     });
-    
+
     const updated = await orders.doc(orderId).get();
     return { success: true, data: { order: publicOrder(updated.data) }, requestId };
   });
@@ -610,15 +610,15 @@ function createOrderHandler({
         or: (arr) => ({ $or: arr })
       };
 
-      const ACTIONS = { 
-        quote: handleQuoteAndCreate, 
-        create: handleQuoteAndCreate, 
-        summary: handleSummary, 
-        list: handleList, 
-        detail: handleDetail, 
-        cancel: handleCancel, 
-        confirm: handleConfirm, 
-        dispute: handleDispute 
+      const ACTIONS = {
+        quote: handleQuoteAndCreate,
+        create: handleQuoteAndCreate,
+        summary: handleSummary,
+        list: handleList,
+        detail: handleDetail,
+        cancel: handleCancel,
+        confirm: handleConfirm,
+        dispute: handleDispute
       };
 
       const actionHandler = ACTIONS[event.action];

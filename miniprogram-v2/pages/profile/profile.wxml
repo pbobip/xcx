@@ -16,6 +16,7 @@
       <view class="h2" style="font-size:32rpx">我的订单</view>
       <view class="link" hover-class="row-hover" bindtap="goOrders">查看全部 ›</view>
     </view>
+    <view class="p muted" wx:if="{{orderCountsError}}" style="padding:12rpx 28rpx 0">{{orderCountsError}}</view>
     <view class="grid-4">
       <view wx:for="{{quicks}}" wx:key="label" class="quick" hover-class="row-hover" bindtap="goOrders" data-status="{{item.label}}">
         <text class="count">{{item.count}}</text>

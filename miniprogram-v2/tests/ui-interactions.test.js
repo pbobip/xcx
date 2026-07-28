@@ -17,6 +17,7 @@ function loadPage(relativePath, seed = {}, options = {}) {
     cloud: {
       async callFunction(params) {
         calls.push({ type: 'callFunction', name: params.name, data: params.data });
+        if (options.cloudCall) return options.cloudCall(params);
         return options.cloudResponse || {
           result: {
             success: true,
@@ -271,6 +272,20 @@ test('个人中心展示云端登录返回的平台用户资料', () => {
   assert.equal(profile.page.data.user.platformUserNo, 'BBX-20260727-ABC123');
 });
 
+test('个人中心订单汇总失败时展示未知计数而不是误导性的零', async () => {
+  const profile = loadPage('pages/profile/profile.js', {}, {
+    cloudCall: async () => {
+      throw new Error('network unavailable');
+    }
+  });
+
+  await profile.page.loadOrderCounts();
+
+  assert.deepEqual(profile.page.data.quicks.map((item) => item.count), ['—', '—', '—', '—']);
+  assert.match(profile.page.data.orderCountsError, /加载失败/);
+  assert.match(readSource('pages/profile/profile.wxml'), /\{\{orderCountsError\}\}/);
+});
+
 test('我的订单快捷入口会把所选状态带到订单页', () => {
   const profile = loadPage('pages/profile/profile.js', {
     bbx_current_user: {
@@ -302,6 +317,46 @@ test('订单列表初始为空，数据由云端加载', () => {
   assert.equal(orders.page.data.empty, false);
   assert.equal(typeof orders.page.loadOrders, 'function');
   assert.equal(typeof orders.page.loadSummary, 'function');
+});
+
+test('顾客订单加载失败后可从错误状态重试并恢复列表', async () => {
+  let attempts = 0;
+  const orders = loadPage('pages/orders/orders.js', {}, {
+    cloudCall: async ({ data }) => {
+      if (data.action !== 'list') return { result: { success: true, data: { counts: {} } } };
+      attempts += 1;
+      if (attempts === 1) throw new Error('network unavailable');
+      return {
+        result: {
+          success: true,
+          data: {
+            orders: [{
+              _id: 'order-1',
+              orderNo: 'BBX-TEST-001',
+              paymentStatus: 'UNPAID',
+              fulfillmentStatus: 'NOT_STARTED',
+              afterSalesStatus: 'NONE',
+              serviceSnapshot: { code: 'VAL_PRO', name: '钻石段位技术陪', unitLabel: '局' },
+              quantity: 1,
+              payableAmountCents: 3500,
+              version: 1
+            }],
+            nextCursor: null
+          }
+        }
+      };
+    }
+  });
+
+  await orders.page.loadOrders(null);
+
+  assert.match(orders.page.data.error, /网络异常/);
+  assert.match(readSource('pages/orders/orders.wxml'), /bindtap="retry"/);
+
+  await orders.page.retry();
+
+  assert.equal(orders.page.data.error, '');
+  assert.equal(orders.page.data.orders[0].orderNo, 'BBX-TEST-001');
 });
 
 test('订单详情页通过 URL 参数 orderNo 从云端加载', () => {

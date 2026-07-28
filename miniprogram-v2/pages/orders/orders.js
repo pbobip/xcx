@@ -13,6 +13,7 @@ Page({
     orders: [],
     empty: false,
     loading: false,
+    error: '',
     noMore: false,
     counts: { all: 0, unpaid: 0, waiting: 0, inProgress: 0, completed: 0 }
   },
@@ -69,13 +70,13 @@ Page({
 
   resetAndLoad() {
     this._cursor = null;
-    this.setData({ orders: [], empty: false, noMore: false });
+    this.setData({ orders: [], empty: false, error: '', noMore: false });
     return this.loadOrders(null);
   },
 
   loadOrders(cursor) {
     if (this.data.loading) return Promise.resolve();
-    this.setData({ loading: true });
+    this.setData({ loading: true, error: '' });
 
     return wx.cloud.callFunction({
       name: 'order',
@@ -90,7 +91,7 @@ Page({
     }).then((res) => {
       if (!res.result || !res.result.success) {
         nav.toast('加载失败，请重试');
-        this.setData({ loading: false });
+        this.setData({ loading: false, error: '订单加载失败，请稍后重试' });
         return;
       }
       const newOrders = (res.result.data.orders || []).map(orderCardSummary);
@@ -100,12 +101,17 @@ Page({
         orders: allOrders,
         empty: allOrders.length === 0,
         noMore: !res.result.data.nextCursor,
-        loading: false
+        loading: false,
+        error: ''
       });
     }).catch(() => {
       nav.toast('网络异常，请重试');
-      this.setData({ loading: false });
+      this.setData({ loading: false, error: '网络异常，订单加载失败，请稍后重试' });
     });
+  },
+
+  retry() {
+    return this.resetAndLoad();
   },
 
   goOrderDetail(e) {
