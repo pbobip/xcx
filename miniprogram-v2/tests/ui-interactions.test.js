@@ -759,40 +759,6 @@ test('支付结果页调起微信支付后只使用云端查单结果显示支�
   );
 });
 
-test('订单详情取消已有预支付的服务订单时转由支付模块安全关单', async () => {
-  const result = loadPage('pages/order-detail/order-detail.js', {
-    bbx_current_user: { id: 'users-test' }
-  }, {
-    cloudCall({ name, data }) {
-      if (name === 'order' && data.action === 'cancel') {
-        return Promise.resolve({ result: {
-          success: false,
-          error: { code: 'PAYMENT_CLOSE_REQUIRED', message: '请先关闭支付' }
-        } });
-      }
-      assert.equal(name, 'payment');
-      assert.equal(data.action, 'close');
-      return Promise.resolve({ result: {
-        success: true,
-        data: { order: { id: 'orders-1', paymentStatus: 'CLOSED' } }
-      } });
-    }
-  });
-  result.page._orderId = 'orders-1';
-  result.page._orderNo = 'BBX-20260728-000001';
-  result.page._version = 1;
-  result.page.loadOrder = () => {};
-
-  result.page.cancelOrder();
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(
-    result.calls.filter((call) => call.type === 'callFunction').map((call) => [call.name, call.data.action]),
-    [['order', 'cancel'], ['payment', 'close']]
-  );
-});
-
 test('关键页面保留防重叠布局约束', () => {
   const appStyles = readSource('app.wxss');
   const detailMarkup = readSource('pages/service-detail/service-detail.wxml');

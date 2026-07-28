@@ -88,6 +88,20 @@ function customer(overrides = {}) {
   }, overrides);
 }
 
+function adminUser(roleId, overrides = {}) {
+  return Object.assign({
+    _id: 'admin-a',
+    authSubjectId: 'openid-admin',
+    displayName: '支付管理员',
+    roleIds: [roleId],
+    status: 'ACTIVE'
+  }, overrides);
+}
+
+function adminRole(id, code, permissions) {
+  return { _id: id, code, name: code, permissions, status: 'ACTIVE' };
+}
+
 function unpaidOrder(overrides = {}) {
   return Object.assign({
     _id: 'order-a',
@@ -176,6 +190,31 @@ test('顾客为自己的未付款服务订单创建预支付并复用有效结�
   }]);
 });
 
+test('超过服务订单付款期限后不能用同一商户订单号重新创建预支付', async () => {
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    orders: [unpaidOrder()],
+    payment_records: [{
+      _id: 'payment-expired', orderId: 'order-a', orderNo: 'BBX202607280001',
+      outTradeNo: 'BBX202607280001', amountCents: 2500, status: 'PREPAY',
+      expiresAt: new Date('2026-07-28T16:20:00.000Z'), version: 1
+    }]
+  });
+  let adapterCalls = 0;
+  const { createPaymentHandler } = require('../cloudfunctions/payment/handler');
+  const main = createPaymentHandler({
+    cloud,
+    wechatPay: { async createJsapiPayment() { adapterCalls += 1; } },
+    now: () => new Date('2026-07-28T16:30:00.000Z')
+  });
+
+  const result = await main({ action: 'prepay.create', payload: { orderId: 'order-a' } });
+
+  assert.equal(result.success, false);
+  assert.equal(result.error.code, 'PAYMENT_EXPIRED');
+  assert.equal(adapterCalls, 0);
+});
+
 test('支付成功通知原子更新服务订单且重复通知不会重复写顾客时间线', async () => {
   const cloud = createMemoryCloud({
     users: [customer()],
@@ -226,9 +265,9 @@ test('支付成功通知原子更新服务订单且重复通知不会重复写�
   const detail = await orderMain({ action: 'detail', payload: { orderId: 'order-a' } });
 
   assert.deepEqual(first, {
-    statusCode: 200,
+    statusCode: 204,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code: 'SUCCESS', message: '成功' })
+    body: ''
   });
   assert.deepEqual(duplicate, first);
   assert.equal(detail.success, true);
@@ -291,9 +330,9 @@ test('支付通知延迟时顾客主动查单可以用微信结果确认付款',
 
 test('管理员关闭超时预支付前必须查单且只有未支付结果才会关单', async () => {
   const cloud = createMemoryCloud({
-    users: [customer(), customer({
-      _id: 'user-admin', openid: 'openid-admin', platformUserNo: 'BBX-ADMIN', roles: ['ADMIN']
-    })],
+    users: [customer()],
+    admin_users: [adminUser('role-admin')],
+    roles: [adminRole('role-admin', 'SUPER_ADMIN', ['payment.close'])],
     orders: [unpaidOrder()],
     payment_records: [{
       _id: 'payment-a', orderId: 'order-a', orderNo: 'BBX202607280001',
@@ -331,45 +370,18 @@ test('管理员关闭超时预支付前必须查单且只有未支付结果才�
   ]);
 });
 
-test('顾客取消自己的预支付服务订单时也必须由支付模块先查单关单', async () => {
-  const cloud = createMemoryCloud({
-    users: [customer()],
-    orders: [unpaidOrder()],
-    payment_records: [{
-      _id: 'payment-a', orderId: 'order-a', orderNo: 'BBX202607280001',
-      outTradeNo: 'BBX202607280001', amountCents: 2500, status: 'PREPAY', version: 1
-    }],
-    user_coupons: [], coupon_templates: [], order_logs: [], messages: []
-  });
-  const wechatPay = {
-    async queryTransaction() { return { out_trade_no: 'BBX202607280001', trade_state: 'NOTPAY' }; },
-    async closeTransaction() {}
-  };
-  const { createPaymentHandler } = require('../cloudfunctions/payment/handler');
-  const main = createPaymentHandler({
-    cloud, wechatPay,
-    now: () => new Date('2026-07-28T16:21:00.000Z')
-  });
-
-  const result = await main({
-    action: 'close', payload: { orderId: 'order-a', reason: '顾客主动取消' }
-  });
-
-  assert.equal(result.success, true);
-  assert.equal(result.data.order.paymentStatus, 'CLOSED');
-  assert.equal(result.data.order.fulfillmentStatus, 'CANCELLED');
-});
-
 test('取消与支付成功乱序时查单真值优先且不会错误调用关单', async () => {
   const cloud = createMemoryCloud({
     users: [customer()],
+    admin_users: [adminUser('role-admin')],
+    roles: [adminRole('role-admin', 'SUPER_ADMIN', ['payment.close'])],
     orders: [unpaidOrder()],
     payment_records: [{
       _id: 'payment-a', orderId: 'order-a', orderNo: 'BBX202607280001',
       outTradeNo: 'BBX202607280001', amountCents: 2500, status: 'PREPAY', version: 1
     }],
     user_coupons: [], order_logs: [], messages: []
-  });
+  }, 'openid-admin');
   let closeCalls = 0;
   const wechatPay = {
     async queryTransaction() {
@@ -402,9 +414,9 @@ test('取消与支付成功乱序时查单真值优先且不会错误调用关�
 
 test('管理员发起部分退款按幂等键只向微信提交一次且受理不等于成功', async () => {
   const cloud = createMemoryCloud({
-    users: [customer({
-      _id: 'user-admin', openid: 'openid-admin', platformUserNo: 'BBX-ADMIN', roles: ['ADMIN']
-    })],
+    users: [customer()],
+    admin_users: [adminUser('role-admin')],
+    roles: [adminRole('role-admin', 'SUPER_ADMIN', ['refund.request', 'refund.execute'])],
     orders: [paidOrder()],
     payment_records: [{
       _id: 'payment-a', orderId: 'order-a', orderNo: 'BBX202607280001',
@@ -439,6 +451,11 @@ test('管理员发起部分退款按幂等键只向微信提交一次且受理�
 
   const first = await main(event);
   const duplicate = await main(event);
+  const overReserved = await main({
+    action: 'refund.request',
+    idempotencyKey: 'refund-idempotency-002',
+    payload: { orderId: 'order-a', amountCents: 2000, reason: '第二笔退款' }
+  });
 
   assert.equal(first.success, true);
   assert.deepEqual(first.data.refund, {
@@ -451,6 +468,8 @@ test('管理员发起部分退款按幂等键只向微信提交一次且受理�
     refundedAt: null
   });
   assert.deepEqual(duplicate.data, first.data);
+  assert.equal(overReserved.success, false);
+  assert.equal(overReserved.error.code, 'REFUND_AMOUNT_EXCEEDED');
   assert.deepEqual(refundCalls, [{
     outTradeNo: 'BBX202607280001',
     outRefundNo: 'BBXR202607280001',
@@ -460,10 +479,59 @@ test('管理员发起部分退款按幂等键只向微信提交一次且受理�
   }]);
 });
 
+test('微信申请退款响应已成功时立即完成全额退款并取消未开始履约', async () => {
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    admin_users: [adminUser('role-admin')],
+    roles: [adminRole('role-admin', 'SUPER_ADMIN', [
+      'refund.request', 'refund.execute', 'refund.query'
+    ])],
+    orders: [paidOrder()],
+    payment_records: [{
+      _id: 'payment-a', orderId: 'order-a', orderNo: 'BBX202607280001',
+      outTradeNo: 'BBX202607280001', transactionId: '4200000000202607280001',
+      amountCents: 2500, status: 'SUCCESS', version: 2
+    }],
+    refund_records: [], order_logs: [], messages: [], audit_logs: []
+  }, 'openid-admin');
+  const wechatPay = {
+    async createRefund(input) {
+      return {
+        out_trade_no: input.outTradeNo,
+        transaction_id: '4200000000202607280001',
+        out_refund_no: input.outRefundNo,
+        refund_id: '5030000000202607280001',
+        status: 'SUCCESS',
+        success_time: '2026-07-28T16:12:00+08:00',
+        amount: { total: 2500, refund: 2500, payer_total: 2500, payer_refund: 2500 }
+      };
+    }
+  };
+  const { createPaymentHandler } = require('../cloudfunctions/payment/handler');
+  const main = createPaymentHandler({
+    cloud, wechatPay,
+    createRefundNo: () => 'BBXR202607280001',
+    now: () => new Date('2026-07-28T16:12:00.000Z')
+  });
+
+  const requested = await main({
+    action: 'refund.request', idempotencyKey: 'refund-full-001',
+    payload: { orderId: 'order-a', amountCents: 2500, reason: '服务开始前全额退款' }
+  });
+  const queried = await main({
+    action: 'refund.query', payload: { refundId: requested.data.refund.id }
+  });
+
+  assert.equal(requested.data.refund.status, 'SUCCESS');
+  assert.equal(queried.data.order.paymentStatus, 'REFUNDED');
+  assert.equal(queried.data.order.fulfillmentStatus, 'CANCELLED');
+  assert.equal(queried.data.order.refundedAmountCents, 2500);
+});
+
 test('退款成功通知累计部分退款金额且重复通知不会重复写顾客时间线', async () => {
   const cloud = createMemoryCloud({
     users: [customer()],
-    orders: [paidOrder({ afterSalesStatus: 'REFUNDING' })],
+    orders: [paidOrder({ afterSalesStatus: 'PROCESSING' })],
     payment_records: [{
       _id: 'payment-a', orderId: 'order-a', orderNo: 'BBX202607280001',
       outTradeNo: 'BBX202607280001', transactionId: '4200000000202607280001',
@@ -484,7 +552,7 @@ test('退款成功通知累计部分退款金额且重复通知不会重复写�
     refund_id: '5030000000202607280001',
     refund_status: 'SUCCESS',
     success_time: '2026-07-28T16:12:00+08:00',
-    amount: { total: 2500, refund: 1000, payer_total: 2500, payer_refund: 1000 }
+    amount: { total: 2500, refund: 1000, payer_total: 2500, payer_refund: 800 }
   };
   const wechatPay = {
     parseNotification() {
@@ -507,7 +575,7 @@ test('退款成功通知累计部分退款金额且重复通知不会重复写�
   });
   const detail = await orderMain({ action: 'detail', payload: { orderId: 'order-a' } });
 
-  assert.equal(first.statusCode, 200);
+  assert.equal(first.statusCode, 204);
   assert.deepEqual(duplicate, first);
   assert.equal(detail.data.order.paymentStatus, 'PARTIALLY_REFUNDED');
   assert.equal(detail.data.order.refundedAmountCents, 1000);
@@ -516,12 +584,61 @@ test('退款成功通知累计部分退款金额且重复通知不会重复写�
   assert.equal(detail.data.timeline.length, 2);
 });
 
+test('退款异常通知不会记为退款成功并保留人工处理状态', async () => {
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    orders: [paidOrder({ afterSalesStatus: 'PROCESSING' })],
+    payment_records: [{
+      _id: 'payment-a', orderId: 'order-a', outTradeNo: 'BBX202607280001',
+      transactionId: '4200000000202607280001', amountCents: 2500,
+      status: 'SUCCESS', version: 2
+    }],
+    refund_records: [{
+      _id: 'refund-a', orderId: 'order-a', outRefundNo: 'BBXR202607280001',
+      refundId: '5030000000202607280001', amountCents: 1000,
+      status: 'PROCESSING', version: 2
+    }],
+    order_logs: [], messages: []
+  });
+  const wechatPay = {
+    parseNotification() {
+      return {
+        id: 'EV-REFUND-ABNORMAL-001', eventType: 'REFUND.ABNORMAL',
+        resource: {
+          mchid: '1900000109', out_trade_no: 'BBX202607280001',
+          transaction_id: '4200000000202607280001',
+          out_refund_no: 'BBXR202607280001', refund_id: '5030000000202607280001',
+          refund_status: 'ABNORMAL',
+          amount: { total: 2500, refund: 1000, payer_total: 2500, payer_refund: 1000 }
+        }
+      };
+    }
+  };
+  const { createRefundNotificationHandler } = require('../cloudfunctions/payment/handler');
+  const response = await createRefundNotificationHandler({
+    cloud, wechatPay, config: { mchid: '1900000109' },
+    now: () => new Date('2026-07-28T16:13:00.000Z')
+  })({ headers: {}, rawBody: 'signed-abnormal-refund' });
+  const { createOrderHandler } = require('../cloudfunctions/order/handler');
+  const detail = await createOrderHandler({ cloud })({
+    action: 'detail', payload: { orderId: 'order-a' }
+  });
+
+  assert.equal(response.statusCode, 204);
+  assert.equal(detail.data.order.paymentStatus, 'PAID');
+  assert.equal(detail.data.order.refundedAmountCents, 0);
+  assert.equal(detail.data.order.afterSalesStatus, 'PROCESSING');
+  assert.equal(detail.data.timeline[0].action, 'REFUND_ABNORMAL');
+});
+
 test('退款通知延迟时财务主动查询可以确认退款成功', async () => {
   const cloud = createMemoryCloud({
-    users: [customer({
-      _id: 'user-finance', openid: 'openid-finance', platformUserNo: 'BBX-FINANCE', roles: ['FINANCE']
+    users: [customer()],
+    admin_users: [adminUser('role-finance', {
+      _id: 'admin-finance', authSubjectId: 'openid-finance', displayName: '财务'
     })],
-    orders: [paidOrder({ afterSalesStatus: 'REFUNDING' })],
+    roles: [adminRole('role-finance', 'FINANCE', ['refund.query'])],
+    orders: [paidOrder({ afterSalesStatus: 'PROCESSING' })],
     payment_records: [{
       _id: 'payment-a', orderId: 'order-a', orderNo: 'BBX202607280001',
       outTradeNo: 'BBX202607280001', transactionId: '4200000000202607280001',
@@ -606,7 +723,7 @@ test('退款成功后迟到的支付通知不会把退款状态回滚为已支�
     action: 'detail', payload: { orderId: 'order-a' }
   });
 
-  assert.equal(response.statusCode, 200);
+  assert.equal(response.statusCode, 204);
   assert.equal(detail.data.order.paymentStatus, 'PARTIALLY_REFUNDED');
   assert.equal(detail.data.order.refundedAmountCents, 1000);
   assert.equal(detail.data.timeline.length, 0);
@@ -614,9 +731,11 @@ test('退款成功后迟到的支付通知不会把退款状态回滚为已支�
 
 test('财务执行 T+1 对账时记录微信账单与本地实收金额差异', async () => {
   const cloud = createMemoryCloud({
-    users: [customer({
-      _id: 'user-finance', openid: 'openid-finance', platformUserNo: 'BBX-FINANCE', roles: ['FINANCE']
+    users: [customer()],
+    admin_users: [adminUser('role-finance', {
+      _id: 'admin-finance', authSubjectId: 'openid-finance', displayName: '财务'
     })],
+    roles: [adminRole('role-finance', 'FINANCE', ['payment.reconcile'])],
     payment_records: [{
       _id: 'payment-a', orderId: 'order-a', orderNo: 'BBX202607270001',
       outTradeNo: 'BBX202607270001', transactionId: '4200000000202607270001',

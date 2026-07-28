@@ -16,6 +16,31 @@ async function currentCustomer(db, cloud) {
   return user && user.status === 'ACTIVE' ? user : null;
 }
 
+async function currentAdmin(db, cloud) {
+  const context = cloud.getWXContext ? cloud.getWXContext() : {};
+  const authSubjectId = context.UID || context.OPENID;
+  if (!authSubjectId) return null;
+  const result = await db.collection('admin_users')
+    .where({ authSubjectId, status: 'ACTIVE' })
+    .limit(1)
+    .get();
+  const admin = result.data[0];
+  if (!admin) return null;
+  const roleCodes = [];
+  const permissions = new Set();
+  for (const roleId of admin.roleIds || []) {
+    const role = (await db.collection('roles').doc(roleId).get()).data;
+    if (!role || role.status !== 'ACTIVE') continue;
+    roleCodes.push(role.code);
+    for (const permission of role.permissions || []) permissions.add(permission);
+  }
+  return Object.assign({}, admin, {
+    isAdmin: true,
+    roleCodes,
+    permissions: Array.from(permissions)
+  });
+}
+
 function publicPayment(record) {
   return {
     orderId: record.orderId,
@@ -45,6 +70,26 @@ function publicPaymentOrder(record) {
   };
 }
 
+function orderMessage(order, { type, title, summary, timestamp }) {
+  return {
+    userId: order.userId,
+    type,
+    title,
+    summary,
+    relatedType: 'ORDER',
+    relatedId: order._id,
+    targetPage: '/pages/order-detail/order-detail',
+    targetParams: { orderId: order._id },
+    isRead: false,
+    readAt: null,
+    sentAt: timestamp,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    version: 1,
+    isTest: order.isTest === true
+  };
+}
+
 async function ownedOrder(db, user, orderId) {
   if (typeof orderId !== 'string' || !orderId) return null;
   const result = await db.collection('orders').doc(orderId).get();
@@ -52,16 +97,15 @@ async function ownedOrder(db, user, orderId) {
   return order && order.userId === user._id ? order : null;
 }
 
-function paymentExpiry(order, timestamp) {
+function paymentExpiry(order) {
   const createdAt = dateValue(order.createdAt);
   const fromCreation = new Date(createdAt.getTime() + 30 * 60 * 1000);
-  if (Number.isFinite(fromCreation.getTime()) && fromCreation > timestamp) return fromCreation;
-  return new Date(timestamp.getTime() + 30 * 60 * 1000);
+  return Number.isFinite(fromCreation.getTime()) ? fromCreation : null;
 }
 
-function hasRole(user, ...roles) {
-  const assigned = Array.isArray(user.roles) ? user.roles : [];
-  return roles.some((role) => assigned.includes(role));
+function hasPermission(admin, permission) {
+  return admin && admin.isAdmin === true &&
+    Array.isArray(admin.permissions) && admin.permissions.includes(permission);
 }
 
 function returnedCouponStatus(coupon, template, timestamp) {
@@ -178,11 +222,21 @@ function createPaymentHandler({
       return failure('INVALID_ARGUMENT', '服务订单应付金额无效', requestId);
     }
     const existingResult = await db.collection('payment_records')
-      .where({ orderId: order._id, status: 'PREPAY' })
+      .where({ orderId: order._id })
       .limit(1)
       .get();
     const existing = existingResult.data[0];
     const timestamp = now();
+    const expiresAt = paymentExpiry(order);
+    if (!expiresAt || expiresAt <= timestamp) {
+      return failure('PAYMENT_EXPIRED', '服务订单已超过付款期限，请重新下单', requestId);
+    }
+    if (existing && isConfirmedPaymentRecord(existing)) {
+      return failure('PAYMENT_STATUS_CONFLICT', '服务订单付款已经确认', requestId);
+    }
+    if (existing && existing.status === 'CLOSED') {
+      return failure('PAYMENT_STATUS_CONFLICT', '微信支付订单已经关闭', requestId);
+    }
     if (existing && dateValue(existing.expiresAt) > timestamp && existing.paymentParams) {
       return {
         success: true,
@@ -191,7 +245,6 @@ function createPaymentHandler({
       };
     }
 
-    const expiresAt = paymentExpiry(order, timestamp);
     const prepay = await wechatPay.createJsapiPayment({
       description: order.snapshot.service.name,
       outTradeNo: order.orderNo,
@@ -219,7 +272,14 @@ function createPaymentHandler({
       version: 1,
       isTest: order.isTest === true
     };
-    await db.collection('payment_records').add({ data: record });
+    if (existing) {
+      await db.collection('payment_records').doc(existing._id).update({ data: Object.assign({}, record, {
+        createdAt: existing.createdAt,
+        version: (existing.version || 1) + 1
+      }) });
+    } else {
+      await db.collection('payment_records').add({ data: record });
+    }
     return {
       success: true,
       data: { payment: publicPayment(record), paymentParams: prepay.paymentParams },
@@ -282,8 +342,7 @@ function createPaymentHandler({
     const orderResult = await db.collection('orders').doc(payload.orderId || '').get();
     const order = orderResult.data;
     if (!order) return failure('NOT_FOUND', '未找到服务订单', requestId);
-    const isOwner = order.userId === user._id;
-    if (!isOwner && !hasRole(user, 'ADMIN', 'FINANCE')) {
+    if (!hasPermission(user, 'payment.close')) {
       return failure('FORBIDDEN', '无权关闭微信支付订单', requestId);
     }
     if (order.paymentStatus === 'CLOSED') {
@@ -356,7 +415,7 @@ function createPaymentHandler({
       } });
       const commonLog = {
         orderId: currentOrder._id, orderNo: currentOrder.orderNo,
-        action: 'PAYMENT_CLOSE', actorType: isOwner ? 'CUSTOMER' : 'ADMIN', actorId: user._id,
+        action: 'PAYMENT_CLOSE', actorType: 'ADMIN', actorId: user._id,
         internalReason: payload.reason || '支付超时', requestId,
         createdAt: timestamp, updatedAt: timestamp, version: 1,
         isTest: currentOrder.isTest === true
@@ -369,6 +428,19 @@ function createPaymentHandler({
         statusDimension: 'FULFILLMENT', fromStatus: 'NOT_STARTED', toStatus: 'CANCELLED',
         customerVisible: false, customerMessage: ''
       }) });
+      await transaction.collection('audit_logs').add({ data: {
+        actorId: user._id,
+        actorRoleCodes: user.roleCodes || [],
+        action: 'PAYMENT_CLOSE',
+        targetType: 'ORDER',
+        targetId: currentOrder._id,
+        beforeSummary: { paymentStatus: currentOrder.paymentStatus },
+        afterSummary: { paymentStatus: 'CLOSED' },
+        reason: payload.reason || '支付超时',
+        requestId,
+        result: 'SUCCESS',
+        createdAt: timestamp
+      } });
     });
     const latestPayment = (await db.collection('payment_records').doc(payment._id).get()).data;
     const latestOrder = (await db.collection('orders').doc(order._id).get()).data;
@@ -380,7 +452,7 @@ function createPaymentHandler({
   }
 
   async function requestRefund({ user, event, payload, requestId }) {
-    if (!hasRole(user, 'ADMIN', 'CUSTOMER_SERVICE')) {
+    if (!hasPermission(user, 'refund.request') || !hasPermission(user, 'refund.execute')) {
       return failure('FORBIDDEN', '无权发起退款', requestId);
     }
     const idempotencyKey = event.idempotencyKey;
@@ -399,56 +471,104 @@ function createPaymentHandler({
       amountCents: payload.amountCents,
       reason
     });
-    const existing = await first(db.collection('refund_records'), { idempotencyKey });
-    if (existing) {
-      if (existing.requestHash !== requestHash) {
-        return failure('IDEMPOTENCY_CONFLICT', '同一退款幂等键不能提交不同内容', requestId);
-      }
-      return { success: true, data: { refund: publicRefund(existing) }, requestId };
-    }
-
-    const orderResult = await db.collection('orders').doc(payload.orderId || '').get();
-    const order = orderResult.data;
-    if (!order) return failure('NOT_FOUND', '未找到服务订单', requestId);
-    if (!['PAID', 'PARTIALLY_REFUNDED'].includes(order.paymentStatus)) {
-      return failure('PAYMENT_STATUS_CONFLICT', '当前支付状态不能退款', requestId);
-    }
-    const payment = await first(db.collection('payment_records'), { orderId: order._id });
-    if (!isConfirmedPaymentRecord(payment)) {
-      return failure('PAYMENT_STATUS_CONFLICT', '没有可退款的成功支付记录', requestId);
-    }
-    const refundResult = await db.collection('refund_records').where({ orderId: order._id }).get();
-    const reservedAmount = refundResult.data
-      .filter((item) => ['CREATING', 'PROCESSING'].includes(item.status))
-      .reduce((sum, item) => sum + item.amountCents, 0);
-    const refundable = order.paidAmountCents - (order.refundedAmountCents || 0) - reservedAmount;
-    if (payload.amountCents > refundable) {
-      return failure('REFUND_AMOUNT_EXCEEDED', '累计退款金额不能超过实付金额', requestId);
-    }
-
     const timestamp = now();
     const outRefundNo = createRefundNo();
-    const addResult = await db.collection('refund_records').add({ data: {
-      orderId: order._id,
-      orderNo: order.orderNo,
-      refundNo: outRefundNo,
-      outRefundNo,
-      refundId: null,
-      amountCents: payload.amountCents,
-      reason,
-      status: 'CREATING',
-      requestedBy: user._id,
-      approvedBy: hasRole(user, 'ADMIN') ? user._id : null,
-      notifyId: null,
-      refundedAt: null,
-      idempotencyKey,
-      requestHash,
-      requestId,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      version: 1,
-      isTest: order.isTest === true
-    } });
+    const reservation = await db.runTransaction(async (transaction) => {
+      const refunds = transaction.collection('refund_records');
+      const existingResult = await refunds.where({ idempotencyKey }).limit(1).get();
+      const existing = existingResult.data[0];
+      if (existing) {
+        if (existing.requestHash !== requestHash) {
+          return { error: failure(
+            'IDEMPOTENCY_CONFLICT',
+            '同一退款幂等键不能提交不同内容',
+            requestId
+          ) };
+        }
+        return { existing };
+      }
+      const order = (await transaction.collection('orders')
+        .doc(payload.orderId || '').get()).data;
+      if (!order) return { error: failure('NOT_FOUND', '未找到服务订单', requestId) };
+      if (!['PAID', 'PARTIALLY_REFUNDED'].includes(order.paymentStatus)) {
+        return { error: failure('PAYMENT_STATUS_CONFLICT', '当前支付状态不能退款', requestId) };
+      }
+      const paymentResult = await transaction.collection('payment_records')
+        .where({ orderId: order._id }).limit(1).get();
+      const payment = paymentResult.data[0];
+      if (!isConfirmedPaymentRecord(payment)) {
+        return { error: failure(
+          'PAYMENT_STATUS_CONFLICT',
+          '没有可退款的成功支付记录',
+          requestId
+        ) };
+      }
+      const refundResult = await refunds.where({ orderId: order._id }).get();
+      const reservedAmount = refundResult.data
+        .filter((item) => ['CREATING', 'PROCESSING', 'UNKNOWN'].includes(item.status))
+        .reduce((sum, item) => sum + item.amountCents, 0);
+      const refundable = order.paidAmountCents -
+        (order.refundedAmountCents || 0) - reservedAmount;
+      if (payload.amountCents > refundable) {
+        return { error: failure(
+          'REFUND_AMOUNT_EXCEEDED',
+          '累计退款金额不能超过实付金额',
+          requestId
+        ) };
+      }
+      const addResult = await refunds.add({ data: {
+        orderId: order._id, orderNo: order.orderNo,
+        refundNo: outRefundNo, outRefundNo, refundId: null,
+        amountCents: payload.amountCents, reason, status: 'CREATING',
+        requestedBy: user._id, approvedBy: user._id,
+        notifyId: null, refundedAt: null,
+        idempotencyKey, requestHash, requestId,
+        createdAt: timestamp, updatedAt: timestamp, version: 1,
+        isTest: order.isTest === true
+      } });
+      await transaction.collection('orders').doc(order._id).update({ data: {
+        afterSalesStatus: 'PROCESSING',
+        updatedAt: timestamp,
+        version: (order.version || 1) + 1
+      } });
+      await transaction.collection('order_logs').add({ data: {
+        orderId: order._id, orderNo: order.orderNo,
+        action: 'REFUND_REQUEST', statusDimension: 'AFTER_SALES',
+        fromStatus: order.afterSalesStatus || 'NONE', toStatus: 'PROCESSING',
+        actorType: 'ADMIN', actorId: user._id,
+        customerVisible: true, customerMessage: '退款申请正在处理中',
+        internalReason: reason, requestId,
+        createdAt: timestamp, updatedAt: timestamp, version: 1,
+        isTest: order.isTest === true
+      } });
+      await transaction.collection('audit_logs').add({ data: {
+        actorId: user._id,
+        actorRoleCodes: user.roleCodes || [],
+        action: 'REFUND_REQUEST',
+        targetType: 'REFUND',
+        targetId: addResult._id,
+        beforeSummary: { orderId: order._id, refundedAmountCents: order.refundedAmountCents || 0 },
+        afterSummary: { amountCents: payload.amountCents, status: 'CREATING' },
+        reason,
+        requestId,
+        result: 'ACCEPTED',
+        createdAt: timestamp
+      } });
+      return {
+        refundId: addResult._id,
+        order,
+        payment
+      };
+    });
+    if (reservation.error) return reservation.error;
+    if (reservation.existing) {
+      return {
+        success: true,
+        data: { refund: publicRefund(reservation.existing) },
+        requestId
+      };
+    }
+    const { order, payment, refundId } = reservation;
     let response;
     try {
       response = await wechatPay.createRefund({
@@ -459,29 +579,38 @@ function createPaymentHandler({
         totalAmountCents: payment.amountCents
       });
     } catch (error) {
-      await db.collection('refund_records').doc(addResult._id).update({ data: {
+      await db.collection('refund_records').doc(refundId).update({ data: {
         status: 'UNKNOWN', updatedAt: now(), version: 2
       } });
       throw error;
     }
-    const acceptedStatus = response.status || 'PROCESSING';
-    await db.collection('refund_records').doc(addResult._id).update({ data: {
+    if (response.status === 'SUCCESS') {
+      const refund = (await db.collection('refund_records').doc(refundId).get()).data;
+      validateRefundResult({ resource: response, refund, payment, order });
+      const confirmed = await confirmRefundSuccess({
+        db, resource: response, refund, payment, order,
+        eventId: `REFUND_RESPONSE:${response.refund_id}`,
+        notificationId: null,
+        timestamp: now()
+      });
+      return {
+        success: true,
+        data: { refund: publicRefund(confirmed.refund) },
+        requestId
+      };
+    }
+    await db.collection('refund_records').doc(refundId).update({ data: {
       refundId: response.refund_id || null,
-      status: acceptedStatus,
+      status: response.status || 'PROCESSING',
       updatedAt: now(),
       version: 2
     } });
-    await db.collection('orders').doc(order._id).update({ data: {
-      afterSalesStatus: 'REFUNDING',
-      updatedAt: now(),
-      version: (order.version || 1) + 1
-    } });
-    const created = (await db.collection('refund_records').doc(addResult._id).get()).data;
+    const created = (await db.collection('refund_records').doc(refundId).get()).data;
     return { success: true, data: { refund: publicRefund(created) }, requestId };
   }
 
   async function queryRefund({ user, payload, requestId }) {
-    if (!hasRole(user, 'ADMIN', 'FINANCE')) {
+    if (!hasPermission(user, 'refund.query')) {
       return failure('FORBIDDEN', '无权查询退款', requestId);
     }
     const refundResult = await db.collection('refund_records').doc(payload.refundId || '').get();
@@ -500,7 +629,7 @@ function createPaymentHandler({
     const timestamp = now();
     if (resource.status === 'SUCCESS') {
       const payment = await first(db.collection('payment_records'), { orderId: refund.orderId });
-      validateSuccessfulRefund({ resource, refund, payment, order });
+      validateRefundResult({ resource, refund, payment, order });
       const confirmed = await confirmRefundSuccess({
         db,
         resource,
@@ -520,6 +649,28 @@ function createPaymentHandler({
         requestId
       };
     }
+    if (['ABNORMAL', 'CLOSED'].includes(resource.status)) {
+      const payment = await first(db.collection('payment_records'), { orderId: refund.orderId });
+      validateRefundResult({ resource, refund, payment, order });
+      const terminal = await recordRefundTerminal({
+        db,
+        resource,
+        refund,
+        order,
+        status: resource.status,
+        eventId: `QUERY_REFUND:${resource.refund_id}`,
+        notificationId: null,
+        timestamp
+      });
+      return {
+        success: true,
+        data: {
+          refund: publicRefund(terminal.refund),
+          order: publicPaymentOrder(terminal.order)
+        },
+        requestId
+      };
+    }
     await db.collection('refund_records').doc(refund._id).update({ data: {
       status: resource.status || refund.status,
       updatedAt: timestamp,
@@ -534,7 +685,7 @@ function createPaymentHandler({
   }
 
   async function reconcileDaily({ user, payload, requestId }) {
-    if (!hasRole(user, 'ADMIN', 'FINANCE')) {
+    if (!hasPermission(user, 'payment.reconcile')) {
       return failure('FORBIDDEN', '无权执行支付对账', requestId);
     }
     const billDate = payload.billDate;
@@ -634,6 +785,19 @@ function createPaymentHandler({
       });
       record._id = added._id;
     }
+    await db.collection('audit_logs').add({ data: {
+      actorId: user._id,
+      actorRoleCodes: user.roleCodes || [],
+      action: 'PAYMENT_RECONCILE',
+      targetType: 'RECONCILIATION',
+      targetId: record._id,
+      beforeSummary: {},
+      afterSummary: { billDate, status: record.status, differenceCount: differences.length },
+      reason: 'T+1 微信支付对账',
+      requestId,
+      result: record.status,
+      createdAt: timestamp
+    } });
     return {
       success: true,
       data: { reconciliation: publicReconciliation(record) },
@@ -644,27 +808,37 @@ function createPaymentHandler({
   return async function main(event = {}) {
     const requestId = event.requestId || '';
     try {
-      const user = await currentCustomer(db, cloud);
-      if (!user) return failure('UNAUTHENTICATED', '请先完成微信登录', requestId);
       if (event.action === 'prepay.create') {
-        return createPrepay({ user, payload: event.payload || {}, requestId });
+        const user = await currentCustomer(db, cloud);
+        if (!user) return failure('UNAUTHENTICATED', '请先完成微信登录', requestId);
+        return await createPrepay({ user, payload: event.payload || {}, requestId });
       }
       if (event.action === 'query') {
-        return queryPayment({ user, payload: event.payload || {}, requestId });
+        const user = await currentCustomer(db, cloud);
+        if (!user) return failure('UNAUTHENTICATED', '请先完成微信登录', requestId);
+        return await queryPayment({ user, payload: event.payload || {}, requestId });
       }
       if (event.action === 'close') {
-        return closePayment({ user, payload: event.payload || {}, requestId });
+        const user = await currentAdmin(db, cloud);
+        if (!user) return failure('UNAUTHENTICATED', '请先完成后台登录', requestId);
+        return await closePayment({ user, payload: event.payload || {}, requestId });
       }
       if (event.action === 'refund.request') {
-        return requestRefund({
+        const user = await currentAdmin(db, cloud);
+        if (!user) return failure('UNAUTHENTICATED', '请先完成后台登录', requestId);
+        return await requestRefund({
           user, event, payload: event.payload || {}, requestId
         });
       }
       if (event.action === 'refund.query') {
-        return queryRefund({ user, payload: event.payload || {}, requestId });
+        const user = await currentAdmin(db, cloud);
+        if (!user) return failure('UNAUTHENTICATED', '请先完成后台登录', requestId);
+        return await queryRefund({ user, payload: event.payload || {}, requestId });
       }
       if (event.action === 'reconcile.daily') {
-        return reconcileDaily({ user, payload: event.payload || {}, requestId });
+        const user = await currentAdmin(db, cloud);
+        if (!user) return failure('UNAUTHENTICATED', '请先完成后台登录', requestId);
+        return await reconcileDaily({ user, payload: event.payload || {}, requestId });
       }
       return failure('INVALID_ARGUMENT', '不支持的支付动作', requestId);
     } catch (error) {
@@ -682,7 +856,7 @@ function notificationResponse(statusCode, code, message) {
   return {
     statusCode,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code, message })
+    body: statusCode === 204 ? '' : JSON.stringify({ code, message })
   };
 }
 
@@ -795,12 +969,12 @@ async function confirmPaymentSuccess({
       fromStatus: currentOrder.fulfillmentStatus,
       toStatus: 'PENDING_ASSIGNMENT'
     }) });
-    await transaction.collection('messages').add({ data: {
-      userId: currentOrder.userId, type: 'PAYMENT_SUCCESS', title: '支付成功',
-      summary: '服务订单支付已确认，平台将尽快安排服务', orderId: currentOrder._id,
-      isRead: false, createdAt: timestamp, updatedAt: timestamp, version: 1,
-      isTest: currentOrder.isTest === true
-    } });
+    await transaction.collection('messages').add({ data: orderMessage(currentOrder, {
+      type: 'PAYMENT_SUCCESS',
+      title: '支付成功',
+      summary: '服务订单支付已确认，平台将尽快安排服务',
+      timestamp
+    }) });
   });
   return {
     payment: (await db.collection('payment_records').doc(payment._id).get()).data,
@@ -846,13 +1020,13 @@ function createPaymentNotificationHandler({
         db.collection('payment_records'),
         { notifyId: notification.id }
       );
-      if (existingNotification) return notificationResponse(200, 'SUCCESS', '成功');
+      if (existingNotification) return notificationResponse(204, 'SUCCESS', '成功');
       const existingTransaction = await first(
         db.collection('payment_records'),
         { transactionId: resource.transaction_id }
       );
       if (isConfirmedPaymentRecord(existingTransaction)) {
-        return notificationResponse(200, 'SUCCESS', '成功');
+        return notificationResponse(204, 'SUCCESS', '成功');
       }
 
       const payment = await first(
@@ -865,107 +1039,19 @@ function createPaymentNotificationHandler({
       if (!order) throw new Error('服务订单不存在');
       const userResult = await db.collection('users').doc(order.userId).get();
       const user = userResult.data;
-      if (!user || !resource.payer || resource.payer.openid !== user.openid) {
-        throw new Error('支付通知顾客身份不匹配');
-      }
-      if (
-        resource.amount.total !== payment.amountCents ||
-        resource.amount.total !== order.payableAmountCents ||
-        !Number.isInteger(resource.amount.payer_total) ||
-        resource.amount.payer_total < 0 ||
-        resource.amount.payer_total > resource.amount.total
-      ) {
-        const mismatch = new Error('支付通知金额不一致');
-        mismatch.code = 'PAYMENT_AMOUNT_MISMATCH';
-        throw mismatch;
-      }
-
+      if (!user) throw new Error('支付通知关联的顾客不存在');
+      validateSuccessfulTransaction({ resource, config, payment, order, user });
       const timestamp = now();
-      const paidAt = paymentTime(resource.success_time, timestamp);
-      await db.runTransaction(async (transaction) => {
-        const txPayments = transaction.collection('payment_records');
-        const txOrders = transaction.collection('orders');
-        const currentPayment = (await txPayments.doc(payment._id).get()).data;
-        if (currentPayment.notifyId === notification.id || currentPayment.status === 'SUCCESS') return;
-        const currentOrder = (await txOrders.doc(order._id).get()).data;
-
-        await txPayments.doc(payment._id).update({ data: {
-          status: 'SUCCESS',
-          transactionId: resource.transaction_id,
-          notifyId: notification.id,
-          paidAt,
-          rawSummary: {
-            eventType: notification.eventType,
-            tradeState: resource.trade_state,
-            bankType: resource.bank_type || ''
-          },
-          updatedAt: timestamp,
-          version: (currentPayment.version || 1) + 1
-        } });
-        await txOrders.doc(order._id).update({ data: {
-          paymentStatus: 'PAID',
-          fulfillmentStatus: 'PENDING_ASSIGNMENT',
-          paidAmountCents: resource.amount.payer_total,
-          paidAt,
-          updatedAt: timestamp,
-          version: (currentOrder.version || 1) + 1
-        } });
-
-        if (currentOrder.userCouponId) {
-          const coupon = (await transaction.collection('user_coupons')
-            .where({ _id: currentOrder.userCouponId, status: 'LOCKED', lockedOrderId: currentOrder._id })
-            .limit(1).get()).data[0];
-          if (coupon) {
-            await transaction.collection('user_coupons').doc(coupon._id).update({ data: {
-              status: 'USED',
-              lockedOrderId: null,
-              usedOrderId: currentOrder._id,
-              usedAt: paidAt,
-              updatedAt: timestamp,
-              version: (coupon.version || 1) + 1
-            } });
-          }
-        }
-
-        const commonLog = {
-          orderId: currentOrder._id,
-          orderNo: currentOrder.orderNo,
-          action: 'PAYMENT_SUCCESS',
-          actorType: 'WECHAT_PAY',
-          actorId: resource.transaction_id,
-          customerVisible: true,
-          customerMessage: '微信支付已确认，正在等待平台派单',
-          internalReason: '',
-          requestId: notification.id,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          version: 1,
-          isTest: currentOrder.isTest === true
-        };
-        await transaction.collection('order_logs').add({ data: Object.assign({}, commonLog, {
-          statusDimension: 'PAYMENT',
-          fromStatus: currentOrder.paymentStatus,
-          toStatus: 'PAID'
-        }) });
-        await transaction.collection('order_logs').add({ data: Object.assign({}, commonLog, {
-          statusDimension: 'FULFILLMENT',
-          fromStatus: currentOrder.fulfillmentStatus,
-          toStatus: 'PENDING_ASSIGNMENT'
-        }) });
-        await transaction.collection('messages').add({ data: {
-          userId: currentOrder.userId,
-          type: 'PAYMENT_SUCCESS',
-          title: '支付成功',
-          summary: '服务订单支付已确认，平台将尽快安排服务',
-          orderId: currentOrder._id,
-          isRead: false,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          version: 1,
-          isTest: currentOrder.isTest === true
-        } });
+      await confirmPaymentSuccess({
+        db,
+        resource,
+        payment,
+        order,
+        eventId: notification.id,
+        eventType: notification.eventType,
+        timestamp
       });
-      return notificationResponse(200, 'SUCCESS', '成功');
+      return notificationResponse(204, 'SUCCESS', '成功');
     } catch (error) {
       logger.error('payment notification failed', {
         notificationId: notification.id || '',
@@ -976,7 +1062,7 @@ function createPaymentNotificationHandler({
   };
 }
 
-function validateSuccessfulRefund({ resource, refund, payment, order }) {
+function validateRefundResult({ resource, refund, payment, order }) {
   if (!payment) throw new Error('退款关联的支付记录不存在');
   if (
     resource.out_trade_no !== payment.outTradeNo ||
@@ -987,9 +1073,10 @@ function validateSuccessfulRefund({ resource, refund, payment, order }) {
     resource.amount.refund !== refund.amountCents ||
     resource.amount.total !== payment.amountCents ||
     resource.amount.payer_total !== order.paidAmountCents ||
-    !Number.isInteger(resource.amount.payer_refund) ||
-    resource.amount.payer_refund < 0 ||
-    resource.amount.payer_refund > refund.amountCents
+    (resource.amount.payer_refund !== undefined &&
+      (!Number.isInteger(resource.amount.payer_refund) ||
+        resource.amount.payer_refund < 0 ||
+        resource.amount.payer_refund > refund.amountCents))
   ) {
     throw new Error('退款结果金额或关联标识不一致');
   }
@@ -1013,7 +1100,7 @@ async function confirmRefundSuccess({
     const currentOrder = (await transaction.collection('orders').doc(order._id).get()).data;
     const currentPayment = (await transaction.collection('payment_records')
       .doc(payment._id).get()).data;
-    const refundedAmountCents = (currentOrder.refundedAmountCents || 0) + resource.amount.payer_refund;
+    const refundedAmountCents = (currentOrder.refundedAmountCents || 0) + resource.amount.refund;
     if (refundedAmountCents > currentOrder.paidAmountCents) {
       throw new Error('累计退款金额超过实付金额');
     }
@@ -1059,13 +1146,81 @@ async function confirmRefundSuccess({
     await transaction.collection('order_logs').add({ data: Object.assign({}, commonLog, {
       statusDimension: 'AFTER_SALES', fromStatus: currentOrder.afterSalesStatus, toStatus: 'RESOLVED'
     }) });
-    await transaction.collection('messages').add({ data: {
-      userId: currentOrder.userId, type: 'REFUND_SUCCESS',
+    if (fulfillmentStatus !== currentOrder.fulfillmentStatus) {
+      await transaction.collection('order_logs').add({ data: Object.assign({}, commonLog, {
+        statusDimension: 'FULFILLMENT',
+        fromStatus: currentOrder.fulfillmentStatus,
+        toStatus: fulfillmentStatus
+      }) });
+    }
+    await transaction.collection('messages').add({ data: orderMessage(currentOrder, {
+      type: 'REFUND_SUCCESS',
       title: isFullRefund ? '退款成功' : '部分退款成功',
-      summary: commonLog.customerMessage, orderId: currentOrder._id, isRead: false,
-      createdAt: timestamp, updatedAt: timestamp, version: 1,
+      summary: commonLog.customerMessage,
+      timestamp
+    }) });
+  });
+  return {
+    refund: (await db.collection('refund_records').doc(refund._id).get()).data,
+    order: (await db.collection('orders').doc(order._id).get()).data
+  };
+}
+
+async function recordRefundTerminal({
+  db,
+  resource,
+  refund,
+  order,
+  status,
+  eventId,
+  notificationId,
+  timestamp
+}) {
+  await db.runTransaction(async (transaction) => {
+    const currentRefund = (await transaction.collection('refund_records')
+      .doc(refund._id).get()).data;
+    if (currentRefund.status === 'SUCCESS' || currentRefund.status === status) return;
+    const currentOrder = (await transaction.collection('orders').doc(order._id).get()).data;
+    const afterSalesStatus = status === 'CLOSED' ? 'CLOSED' : 'PROCESSING';
+    const customerMessage = status === 'CLOSED'
+      ? '退款已关闭，请联系平台客服处理'
+      : '退款出现异常，平台正在人工处理';
+    await transaction.collection('refund_records').doc(refund._id).update({ data: {
+      status,
+      refundId: resource.refund_id || currentRefund.refundId,
+      notifyId: notificationId || currentRefund.notifyId,
+      updatedAt: timestamp,
+      version: (currentRefund.version || 1) + 1
+    } });
+    await transaction.collection('orders').doc(order._id).update({ data: {
+      afterSalesStatus,
+      updatedAt: timestamp,
+      version: (currentOrder.version || 1) + 1
+    } });
+    await transaction.collection('order_logs').add({ data: {
+      orderId: currentOrder._id,
+      orderNo: currentOrder.orderNo,
+      action: `REFUND_${status}`,
+      statusDimension: 'AFTER_SALES',
+      fromStatus: currentOrder.afterSalesStatus,
+      toStatus: afterSalesStatus,
+      actorType: 'WECHAT_PAY',
+      actorId: resource.refund_id || '',
+      customerVisible: true,
+      customerMessage,
+      internalReason: currentRefund.reason || '',
+      requestId: eventId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      version: 1,
       isTest: currentOrder.isTest === true
     } });
+    await transaction.collection('messages').add({ data: orderMessage(currentOrder, {
+      type: `REFUND_${status}`,
+      title: status === 'CLOSED' ? '退款已关闭' : '退款异常',
+      summary: customerMessage,
+      timestamp
+    }) });
   });
   return {
     refund: (await db.collection('refund_records').doc(refund._id).get()).data,
@@ -1094,119 +1249,55 @@ function createRefundNotificationHandler({
       return notificationResponse(401, 'FAIL', '签名验证或解密失败');
     }
     try {
-      if (notification.eventType !== 'REFUND.SUCCESS') {
-        throw new Error('不支持的退款通知类型');
-      }
+      const statusByEvent = {
+        'REFUND.SUCCESS': 'SUCCESS',
+        'REFUND.ABNORMAL': 'ABNORMAL',
+        'REFUND.CLOSED': 'CLOSED'
+      };
+      const status = statusByEvent[notification.eventType];
+      if (!status) throw new Error('不支持的退款通知类型');
       const resource = notification.resource || {};
-      if (resource.mchid !== config.mchid || resource.refund_status !== 'SUCCESS') {
+      if (resource.mchid !== config.mchid || resource.refund_status !== status) {
         throw new Error('退款通知商户或状态无效');
       }
       const duplicate = await first(db.collection('refund_records'), { notifyId: notification.id });
-      if (duplicate) return notificationResponse(200, 'SUCCESS', '成功');
+      if (duplicate) return notificationResponse(204, 'SUCCESS', '成功');
       const refund = await first(
         db.collection('refund_records'),
         { outRefundNo: resource.out_refund_no }
       );
       if (!refund) throw new Error('退款记录不存在');
-      if (refund.status === 'SUCCESS') return notificationResponse(200, 'SUCCESS', '成功');
+      if (refund.status === 'SUCCESS') return notificationResponse(204, 'SUCCESS', '成功');
+      if (refund.status === status) return notificationResponse(204, 'SUCCESS', '成功');
       const order = (await db.collection('orders').doc(refund.orderId).get()).data;
       const payment = await first(db.collection('payment_records'), { orderId: refund.orderId });
       if (!order || !payment) throw new Error('退款关联的支付或服务订单不存在');
-      if (
-        resource.out_trade_no !== payment.outTradeNo ||
-        resource.transaction_id !== payment.transactionId ||
-        (refund.refundId && resource.refund_id !== refund.refundId) ||
-        !resource.amount ||
-        resource.amount.refund !== refund.amountCents ||
-        resource.amount.total !== payment.amountCents ||
-        resource.amount.payer_total !== order.paidAmountCents ||
-        !Number.isInteger(resource.amount.payer_refund) ||
-        resource.amount.payer_refund < 0 ||
-        resource.amount.payer_refund > refund.amountCents
-      ) {
-        throw new Error('退款通知金额或关联标识不一致');
-      }
-
+      validateRefundResult({ resource, refund, payment, order });
       const timestamp = now();
-      const refundedAt = paymentTime(resource.success_time, timestamp);
-      await db.runTransaction(async (transaction) => {
-        const currentRefund = (await transaction.collection('refund_records')
-          .doc(refund._id).get()).data;
-        if (currentRefund.status === 'SUCCESS' || currentRefund.notifyId === notification.id) return;
-        const currentOrder = (await transaction.collection('orders').doc(order._id).get()).data;
-        const currentPayment = (await transaction.collection('payment_records')
-          .doc(payment._id).get()).data;
-        const refundedAmountCents = (currentOrder.refundedAmountCents || 0) + resource.amount.payer_refund;
-        if (refundedAmountCents > currentOrder.paidAmountCents) {
-          throw new Error('累计退款金额超过实付金额');
-        }
-        const isFullRefund = refundedAmountCents === currentOrder.paidAmountCents;
-        const paymentStatus = isFullRefund ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
-        const fulfillmentStatus = isFullRefund && ['PENDING_ASSIGNMENT', 'WAITING_START'].includes(currentOrder.fulfillmentStatus)
-          ? 'CANCELLED'
-          : currentOrder.fulfillmentStatus;
-
-        await transaction.collection('refund_records').doc(refund._id).update({ data: {
-          status: 'SUCCESS',
-          refundId: resource.refund_id,
-          notifyId: notification.id,
-          refundedAt,
-          updatedAt: timestamp,
-          version: (currentRefund.version || 1) + 1
-        } });
-        await transaction.collection('payment_records').doc(payment._id).update({ data: {
-          status: isFullRefund ? 'REFUND' : 'PARTIAL_REFUND',
-          updatedAt: timestamp,
-          version: (currentPayment.version || 1) + 1
-        } });
-        await transaction.collection('orders').doc(order._id).update({ data: {
-          paymentStatus,
-          fulfillmentStatus,
-          afterSalesStatus: 'RESOLVED',
-          refundedAmountCents,
-          updatedAt: timestamp,
-          version: (currentOrder.version || 1) + 1
-        } });
-
-        const commonLog = {
-          orderId: currentOrder._id,
-          orderNo: currentOrder.orderNo,
-          action: 'REFUND_SUCCESS',
-          actorType: 'WECHAT_PAY',
-          actorId: resource.refund_id,
-          customerVisible: true,
-          customerMessage: isFullRefund ? '退款已原路退回' : '部分退款已原路退回',
-          internalReason: currentRefund.reason || '',
-          requestId: notification.id,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          version: 1,
-          isTest: currentOrder.isTest === true
-        };
-        await transaction.collection('order_logs').add({ data: Object.assign({}, commonLog, {
-          statusDimension: 'PAYMENT',
-          fromStatus: currentOrder.paymentStatus,
-          toStatus: paymentStatus
-        }) });
-        await transaction.collection('order_logs').add({ data: Object.assign({}, commonLog, {
-          statusDimension: 'AFTER_SALES',
-          fromStatus: currentOrder.afterSalesStatus,
-          toStatus: 'RESOLVED'
-        }) });
-        await transaction.collection('messages').add({ data: {
-          userId: currentOrder.userId,
-          type: 'REFUND_SUCCESS',
-          title: isFullRefund ? '退款成功' : '部分退款成功',
-          summary: commonLog.customerMessage,
-          orderId: currentOrder._id,
-          isRead: false,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          version: 1,
-          isTest: currentOrder.isTest === true
-        } });
-      });
-      return notificationResponse(200, 'SUCCESS', '成功');
+      if (status === 'SUCCESS') {
+        await confirmRefundSuccess({
+          db,
+          resource,
+          refund,
+          payment,
+          order,
+          eventId: notification.id,
+          notificationId: notification.id,
+          timestamp
+        });
+      } else {
+        await recordRefundTerminal({
+          db,
+          resource,
+          refund,
+          order,
+          status,
+          eventId: notification.id,
+          notificationId: notification.id,
+          timestamp
+        });
+      }
+      return notificationResponse(204, 'SUCCESS', '成功');
     } catch (error) {
       logger.error('refund notification failed', {
         notificationId: notification.id || '',

@@ -1,5 +1,4 @@
 const nav = require('../../utils/nav');
-const payment = require('../../utils/payment');
 const auth = require('../../utils/auth');
 const {
   statusText, statusTitle, progressIndex,
@@ -157,16 +156,8 @@ Page({
               version: this._version
             }
           }
-        }).then(async (result) => {
+        }).then((result) => {
           if (result.result && result.result.success) {
-            nav.toast('订单已取消');
-            this.loadOrder();
-          } else if (result.result && result.result.error
-            && result.result.error.code === 'PAYMENT_CLOSE_REQUIRED') {
-            await payment.call('close', {
-              orderId: this._orderId,
-              reason: '顾客主动取消'
-            });
             nav.toast('订单已取消');
             this.loadOrder();
           } else {
@@ -174,7 +165,7 @@ Page({
               ? result.result.error.message
               : '取消失败');
           }
-        }).catch((error) => nav.toast(error.message || '网络异常'));
+        }).catch(() => nav.toast('网络异常'));
       }
     });
   },

@@ -74,7 +74,7 @@ async function responseBody(response) {
   }
 }
 
-function verifyResponse(config, response, rawBody) {
+function verifyResponse(config, response, rawBody, currentTime) {
   const timestamp = response.headers.get('wechatpay-timestamp');
   const nonce = response.headers.get('wechatpay-nonce');
   const signature = response.headers.get('wechatpay-signature');
@@ -84,6 +84,10 @@ function verifyResponse(config, response, rawBody) {
   }
   if (serial !== config.wechatPayPublicKeyId) {
     throw new Error('微信支付响应公钥 ID 不匹配');
+  }
+  const responseTime = Number(timestamp) * 1000;
+  if (!Number.isFinite(responseTime) || Math.abs(currentTime.getTime() - responseTime) > 300000) {
+    throw new Error('微信支付响应时间戳已过期');
   }
   const message = `${timestamp}\n${nonce}\n${rawBody}\n`;
   if (!verify(config.wechatPayPublicKey, message, signature)) {
@@ -154,7 +158,7 @@ function createWechatPayClient({
       body: body || undefined
     });
     const result = await responseBody(response);
-    verifyResponse(config, response, result.rawBody);
+    verifyResponse(config, response, result.rawBody, now());
     if (response.status < 200 || response.status >= 300) {
       const error = new Error(result.data.message || '微信支付请求失败');
       error.code = result.data.code || 'WECHAT_PAY_ERROR';
@@ -282,9 +286,17 @@ function createWechatPayClient({
     ) {
       throw new Error('微信支付交易账单下载信息无效');
     }
+    const downloadUrl = new URL(metadata.download_url);
+    if (downloadUrl.protocol !== 'https:') throw new Error('微信支付交易账单下载地址必须使用 HTTPS');
+    const pathWithQuery = `${downloadUrl.pathname}${downloadUrl.search}`;
+    const timestamp = timestampSeconds(now());
+    const nonce = createNonce();
     const response = await request(metadata.download_url, {
       method: 'GET',
-      headers: { Accept: 'text/plain' }
+      headers: {
+        Accept: 'text/plain',
+        Authorization: authorization(config, 'GET', pathWithQuery, timestamp, nonce, '')
+      }
     });
     const content = await response.text();
     if (response.status < 200 || response.status >= 300) {

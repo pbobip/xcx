@@ -429,6 +429,22 @@ test('正式微信支付 Adapter 下载交易账单并在返回前校验 SHA1', 
 
   assert.equal(requests[0].url, 'https://api.mch.weixin.qq.com/v3/bill/tradebill?bill_date=2026-07-27&bill_type=ALL');
   assert.equal(requests[1].url, 'https://api.mch.weixin.qq.com/v3/billdownload/file?token=short-lived');
+  const downloadSignature = /signature="([^"]+)"/
+    .exec(requests[1].options.headers.Authorization)[1];
+  const downloadMessage = [
+    'GET',
+    '/v3/billdownload/file?token=short-lived',
+    '1700000000',
+    'bill-nonce',
+    '',
+    ''
+  ].join('\n');
+  assert.equal(crypto.verify(
+    'RSA-SHA256',
+    Buffer.from(downloadMessage),
+    merchant.publicKey,
+    Buffer.from(downloadSignature, 'base64')
+  ), true);
   assert.equal(result.hashType, 'SHA1');
   assert.equal(result.hashValue, billHash);
   assert.equal(result.content, bill);

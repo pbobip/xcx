@@ -254,9 +254,15 @@
 
 ### 7.2 `refund_records`
 
-字段：`orderId`、`refundNo`、`outRefundNo`、`refundId`、`amountCents`、`reason`、`status`、`requestedBy`、`approvedBy`、`notifyId`、`refundedAt`、`requestId`。
+字段：`orderId`、`refundNo`、`outRefundNo`、`refundId`、`amountCents`、`reason`、`status`、`requestedBy`、`approvedBy`、`notifyId`、`refundedAt`、`idempotencyKey`、`requestHash`、`requestId`。
 
-索引：`outRefundNo` 唯一；`refundId` 唯一（允许申请前为空）；`orderId + createdAt`；`notifyId` 唯一。
+索引：`outRefundNo` 唯一；`refundId` 唯一（允许申请前为空）；`idempotencyKey` 唯一；`orderId + createdAt`；`notifyId` 唯一。
+
+### 7.3 `reconciliation_records`
+
+字段：`billDate`、`status`（`MATCHED`/`DIFFERENCE`）、`hashType`、`hashValue`、`paymentCount`、`refundCount`、`differences[]`、`checkedAt`、`checkedBy`、`requestId`。差异只保存平台订单号、平台退款号、微信交易号及整数分金额，不保存账单原文件或顾客身份明文。
+
+索引：`billDate` 唯一；`status + checkedAt`。同一 T 日账单重复执行时覆盖更新同一记录；只有 SHA1 校验通过的账单才能进入对账。
 
 ## 8. 优惠券
 

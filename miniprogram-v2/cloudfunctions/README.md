@@ -74,7 +74,7 @@ cloudfunctions/
 - `reconcile.daily`；
 - 独立的 `/payment/notify` 与 `/refund/notify` HTTPS 路径。
 
-部署前建立 `payment_records`、`refund_records`、`reconciliation_records` 集合并设置为仅云函数可读写，同时按 `docs/database.md` 建立唯一索引。通知路径必须保留原始 HTTP Body，不能先解析再重新序列化。
+部署前建立 `payment_records`、`refund_records`、`reconciliation_records` 集合并设置为仅云函数可读写，同时按 `docs/database.md` 建立唯一索引。后台调用还需要 `admin_users`、`roles` 和 `audit_logs`：关单权限为 `payment.close`，退款执行需同时具备 `refund.request` 与 `refund.execute`，退款查询为 `refund.query`，对账为 `payment.reconcile`。通知路径必须保留原始 HTTP Body，不能先解析再重新序列化。
 
 以下配置必须由授权人员直接写入云端安全配置，不得提交到版本库、普通数据库或前端：
 
