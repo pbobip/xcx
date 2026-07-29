@@ -491,7 +491,7 @@ function createPaymentHandler({
   async function runMaintenance({ requestId }) {
     const timestamp = now();
     const result = await db.collection('payment_records')
-      .where({ status: 'PREPAY' })
+      .where({ status: db.command.in(['PREPAY', 'NOTPAY']) })
       .orderBy('expiresAt', 'asc')
       .limit(20)
       .get();
@@ -505,10 +505,10 @@ function createPaymentHandler({
       confirmedPaidCount: 0,
       pendingCount: 0
     };
-    const user = maintenanceActor();
+    const systemActor = maintenanceActor();
     for (const payment of expired) {
       const closed = await closePayment({
-        user,
+        user: systemActor,
         payload: { orderId: payment.orderId, reason: '支付超时定时关单' },
         requestId
       });
@@ -531,7 +531,7 @@ function createPaymentHandler({
       } else {
         try {
           const reconciled = await reconcileDaily({
-            user,
+            user: systemActor,
             payload: { billDate },
             requestId
           });
@@ -1434,6 +1434,7 @@ function createRefundNotificationHandler({
 }
 
 module.exports = {
+  hasWechatTimerSource,
   createPaymentHandler,
   createPaymentNotificationHandler,
   createRefundNotificationHandler

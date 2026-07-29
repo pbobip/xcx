@@ -1,6 +1,7 @@
 const cloud = require('wx-server-sdk');
 const { createWechatPayClient } = require('./wechat-pay');
 const {
+  hasWechatTimerSource,
   createPaymentHandler,
   createPaymentNotificationHandler,
   createRefundNotificationHandler
@@ -29,11 +30,6 @@ function rawBody(event) {
     : event.body;
 }
 
-function isTimerInvocation() {
-  const context = cloud.getWXContext ? cloud.getWXContext() : {};
-  return String(context.SOURCE || '').split(',').includes('wx_trigger');
-}
-
 exports.main = async function main(event = {}, context = {}) {
   const path = requestPath(event);
   if (path.endsWith('/payment/notify')) {
@@ -42,7 +38,7 @@ exports.main = async function main(event = {}, context = {}) {
   if (path.endsWith('/refund/notify')) {
     return refundNotificationMain({ headers: event.headers || {}, rawBody: rawBody(event) });
   }
-  if (isTimerInvocation()) {
+  if (hasWechatTimerSource(cloud)) {
     return paymentMain({
       action: 'maintenance.run',
       requestId: context.requestId || event.TriggerName || ''

@@ -17,7 +17,10 @@ function createMemoryCloud(seed, openid = 'openid-customer-a', source = 'wx_clie
   let nextId = 1;
 
   function matches(record, query) {
-    return Object.entries(query || {}).every(([key, value]) => record[key] === value);
+    return Object.entries(query || {}).every(([key, value]) => {
+      if (value && Array.isArray(value.$in)) return value.$in.includes(record[key]);
+      return record[key] === value;
+    });
   }
 
   function collection(name) {
@@ -844,6 +847,38 @@ test('可信定时触发器查单后关闭已超时的未付款服务订单且�
   assert.equal(second.success, true);
   assert.equal(second.data.maintenance.closedCount, 0);
   assert.equal(queryCalls, 1);
+  assert.equal(closeCalls, 1);
+});
+
+test('顾客主动查单记录为未付款后仍会进入可信定时关单扫描', async () => {
+  const cloud = createMemoryCloud({
+    orders: [unpaidOrder()],
+    payment_records: [{
+      _id: 'payment-notpay', orderId: 'order-a', orderNo: 'BBX202607280001',
+      outTradeNo: 'BBX202607280001', amountCents: 2500, status: 'NOTPAY',
+      expiresAt: new Date('2026-07-28T16:20:00.000Z'), version: 2
+    }],
+    user_coupons: [],
+    coupon_templates: [],
+    order_logs: [],
+    audit_logs: [],
+    reconciliation_records: []
+  }, '', 'wx_trigger');
+  let closeCalls = 0;
+  const { createPaymentHandler } = require('../cloudfunctions/payment/handler');
+  const main = createPaymentHandler({
+    cloud,
+    wechatPay: {
+      async queryTransaction() { return { trade_state: 'NOTPAY' }; },
+      async closeTransaction() { closeCalls += 1; }
+    },
+    now: () => new Date('2026-07-28T16:30:00.000Z')
+  });
+
+  const result = await main({ action: 'maintenance.run', requestId: 'timer-notpay' });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data.maintenance.closedCount, 1);
   assert.equal(closeCalls, 1);
 });
 
