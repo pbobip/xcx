@@ -10,7 +10,7 @@ function clone(value) {
   return value;
 }
 
-function createMemoryCloud(seed, openid = 'openid-customer-a') {
+function createMemoryCloud(seed, openid = 'openid-customer-a', source = 'wx_client') {
   const data = Object.fromEntries(
     Object.entries(seed).map(([name, records]) => [name, records.map(clone)])
   );
@@ -75,7 +75,7 @@ function createMemoryCloud(seed, openid = 'openid-customer-a') {
   };
   return {
     database: () => database,
-    getWXContext: () => ({ OPENID: openid })
+    getWXContext: () => ({ OPENID: openid, SOURCE: source })
   };
 }
 
@@ -774,4 +774,121 @@ test('财务执行 T+1 对账时记录微信账单与本地实收金额差异', 
     localAmountCents: 2500,
     billAmountCents: 2400
   }]);
+});
+
+test('小程序顾客伪造定时维护动作时不能获得系统权限', async () => {
+  const cloud = createMemoryCloud({
+    users: [customer()],
+    orders: [unpaidOrder()],
+    payment_records: [{
+      _id: 'payment-expired', orderId: 'order-a', orderNo: 'BBX202607280001',
+      outTradeNo: 'BBX202607280001', amountCents: 2500, status: 'PREPAY',
+      expiresAt: new Date('2026-07-28T16:20:00.000Z'), version: 1
+    }]
+  });
+  let queryCalls = 0;
+  const { createPaymentHandler } = require('../cloudfunctions/payment/handler');
+  const main = createPaymentHandler({
+    cloud,
+    wechatPay: {
+      async queryTransaction() { queryCalls += 1; return { trade_state: 'NOTPAY' }; }
+    },
+    now: () => new Date('2026-07-28T16:30:00.000Z')
+  });
+
+  const result = await main({ action: 'maintenance.run' });
+
+  assert.equal(result.success, false);
+  assert.equal(result.error.code, 'FORBIDDEN');
+  assert.equal(queryCalls, 0);
+});
+
+test('可信定时触发器查单后关闭已超时的未付款服务订单且重复执行幂等', async () => {
+  const cloud = createMemoryCloud({
+    orders: [unpaidOrder()],
+    payment_records: [{
+      _id: 'payment-expired', orderId: 'order-a', orderNo: 'BBX202607280001',
+      outTradeNo: 'BBX202607280001', amountCents: 2500, status: 'PREPAY',
+      expiresAt: new Date('2026-07-28T16:20:00.000Z'), version: 1
+    }],
+    user_coupons: [],
+    coupon_templates: [],
+    order_logs: [],
+    audit_logs: [],
+    reconciliation_records: []
+  }, '', 'wx_trigger');
+  let queryCalls = 0;
+  let closeCalls = 0;
+  const { createPaymentHandler } = require('../cloudfunctions/payment/handler');
+  const main = createPaymentHandler({
+    cloud,
+    wechatPay: {
+      async queryTransaction(outTradeNo) {
+        queryCalls += 1;
+        assert.equal(outTradeNo, 'BBX202607280001');
+        return { trade_state: 'NOTPAY' };
+      },
+      async closeTransaction(outTradeNo) {
+        closeCalls += 1;
+        assert.equal(outTradeNo, 'BBX202607280001');
+      }
+    },
+    now: () => new Date('2026-07-28T16:30:00.000Z')
+  });
+
+  const first = await main({ action: 'maintenance.run', requestId: 'timer-1' });
+  const second = await main({ action: 'maintenance.run', requestId: 'timer-2' });
+
+  assert.equal(first.success, true);
+  assert.equal(first.data.maintenance.closedCount, 1);
+  assert.equal(second.success, true);
+  assert.equal(second.data.maintenance.closedCount, 0);
+  assert.equal(queryCalls, 1);
+  assert.equal(closeCalls, 1);
+});
+
+test('可信定时触发器在北京时间十点后只执行一次上一日支付对账', async () => {
+  const cloud = createMemoryCloud({
+    payment_records: [{
+      _id: 'payment-a', orderId: 'order-a', orderNo: 'BBX202607280001',
+      outTradeNo: 'BBX202607280001', transactionId: '4200000000202607280001',
+      amountCents: 2500, status: 'SUCCESS',
+      paidAt: new Date('2026-07-28T08:01:00.000Z')
+    }],
+    refund_records: [],
+    reconciliation_records: [],
+    audit_logs: []
+  }, '', 'wx_trigger');
+  const bill = [
+    '交易时间,微信订单号,商户订单号,订单金额,微信退款单号,商户退款单号,退款金额',
+    '`2026-07-28 16:01:00,`4200000000202607280001,`BBX202607280001,`25.00,`,`,`,',
+    '总交易单数,总交易额,总退款金额',
+    '`1,`25.00,`0.00'
+  ].join('\n');
+  let billCalls = 0;
+  const { createPaymentHandler } = require('../cloudfunctions/payment/handler');
+  const main = createPaymentHandler({
+    cloud,
+    wechatPay: {
+      async downloadTradeBill(billDate) {
+        billCalls += 1;
+        assert.equal(billDate, '2026-07-28');
+        return { hashType: 'SHA1', hashValue: 'verified-sha1', content: bill };
+      }
+    },
+    now: () => new Date('2026-07-29T02:05:00.000Z')
+  });
+
+  const first = await main({ action: 'maintenance.run', requestId: 'timer-1' });
+  const second = await main({ action: 'maintenance.run', requestId: 'timer-2' });
+
+  assert.equal(first.success, true);
+  assert.deepEqual(first.data.maintenance.reconciliation, {
+    billDate: '2026-07-28', status: 'MATCHED', skipped: false
+  });
+  assert.equal(second.success, true);
+  assert.deepEqual(second.data.maintenance.reconciliation, {
+    billDate: '2026-07-28', status: 'MATCHED', skipped: true
+  });
+  assert.equal(billCalls, 1);
 });

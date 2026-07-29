@@ -248,13 +248,13 @@
 
 ### 7.1 `payment_records`
 
-字段：`orderId`、`orderNo`、`outTradeNo`、`transactionId`、`amountCents`、`status`、`prepayId`、`notifyId`、`paidAt`、`lastQueriedAt`、`rawSummary`、`requestId`。`rawSummary` 只保存排障所需的脱敏摘要。
+字段：`orderId`、`orderNo`、`outTradeNo`、`transactionId`、`amountCents`、`status`、`prepayId`、`notifyId`、`paidAt`、`lastQueriedAt`、`rawSummary`、`requestId`。`rawSummary` 只保存排障所需的脱敏摘要。真实 `transactionId` 或 `notifyId` 尚未取得时使用按平台订单号生成的内部唯一占位值，避免普通唯一索引上的多条空值冲突；占位值不返回公开接口。
 
-索引：`outTradeNo` 唯一；`transactionId` 唯一（允许付款前为空）；`orderId + createdAt`；`notifyId` 唯一。
+索引：`outTradeNo` 唯一；`transactionId` 唯一（允许付款前为空）；`orderId + createdAt`；`notifyId` 唯一；`status + expiresAt`（定时关单扫描）。
 
 ### 7.2 `refund_records`
 
-字段：`orderId`、`refundNo`、`outRefundNo`、`refundId`、`amountCents`、`reason`、`status`、`requestedBy`、`approvedBy`、`notifyId`、`refundedAt`、`idempotencyKey`、`requestHash`、`requestId`。
+字段：`orderId`、`refundNo`、`outRefundNo`、`refundId`、`amountCents`、`reason`、`status`、`requestedBy`、`approvedBy`、`notifyId`、`refundedAt`、`idempotencyKey`、`requestHash`、`requestId`。真实 `refundId` 或 `notifyId` 尚未取得时同样使用按平台退款号生成的内部唯一占位值，公开响应仍返回空值。
 
 索引：`outRefundNo` 唯一；`refundId` 唯一（允许申请前为空）；`idempotencyKey` 唯一；`orderId + createdAt`；`notifyId` 唯一。
 

@@ -788,7 +788,7 @@ async function handleCancel({ db, user, payload, requestId, now }) {
     if (payment && payment.status !== 'CLOSED') {
       return failure(
         'PAYMENT_CLOSE_REQUIRED',
-        '该服务订单已创建微信预支付，请先查单并关闭支付',
+        '该服务订单已进入微信支付流程，请稍后刷新；仍需取消请联系客服',
         requestId
       );
     }

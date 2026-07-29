@@ -108,6 +108,21 @@ function hasPermission(admin, permission) {
     Array.isArray(admin.permissions) && admin.permissions.includes(permission);
 }
 
+function hasWechatTimerSource(cloud) {
+  const context = cloud.getWXContext ? cloud.getWXContext() : {};
+  return String(context.SOURCE || '').split(',').includes('wx_trigger');
+}
+
+function maintenanceActor() {
+  return {
+    _id: 'system:payment-maintenance',
+    isAdmin: true,
+    isSystem: true,
+    roleCodes: ['SYSTEM'],
+    permissions: ['payment.close', 'payment.reconcile']
+  };
+}
+
 function returnedCouponStatus(coupon, template, timestamp) {
   if (!template || template.status !== 'ACTIVE') return 'VOID';
   const validFrom = dateValue(coupon.validFrom || template.validFrom);
@@ -123,12 +138,20 @@ function defaultRefundNo(now) {
   return `BBXR${stamp}${suffix}`;
 }
 
+function pendingUniqueId(kind, businessNo) {
+  return `PENDING:${kind}:${businessNo}`;
+}
+
+function publicExternalId(value) {
+  return typeof value === 'string' && !value.startsWith('PENDING:') ? value : null;
+}
+
 function publicRefund(record) {
   return {
     id: record._id,
     orderId: record.orderId,
     outRefundNo: record.outRefundNo,
-    refundId: record.refundId || null,
+    refundId: publicExternalId(record.refundId),
     amountCents: record.amountCents,
     status: record.status,
     refundedAt: record.refundedAt || null
@@ -188,6 +211,20 @@ function chinaDate(value) {
   const date = dateValue(value);
   if (!Number.isFinite(date.getTime())) return '';
   return new Date(date.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function previousChinaDate(value) {
+  const date = dateValue(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const chinaTime = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+  chinaTime.setUTCDate(chinaTime.getUTCDate() - 1);
+  return chinaTime.toISOString().slice(0, 10);
+}
+
+function chinaHour(value) {
+  const date = dateValue(value);
+  if (!Number.isFinite(date.getTime())) return -1;
+  return new Date(date.getTime() + 8 * 60 * 60 * 1000).getUTCHours();
 }
 
 function publicReconciliation(record) {
@@ -256,13 +293,13 @@ function createPaymentHandler({
       orderId: order._id,
       orderNo: order.orderNo,
       outTradeNo: order.orderNo,
-      transactionId: null,
+      transactionId: pendingUniqueId('TRANSACTION', order.orderNo),
       amountCents: order.payableAmountCents,
       status: 'PREPAY',
       prepayId: prepay.prepayId,
       paymentParams: prepay.paymentParams,
       expiresAt,
-      notifyId: null,
+      notifyId: pendingUniqueId('PAYMENT_NOTIFY', order.orderNo),
       paidAt: null,
       lastQueriedAt: null,
       rawSummary: null,
@@ -415,7 +452,7 @@ function createPaymentHandler({
       } });
       const commonLog = {
         orderId: currentOrder._id, orderNo: currentOrder.orderNo,
-        action: 'PAYMENT_CLOSE', actorType: 'ADMIN', actorId: user._id,
+        action: 'PAYMENT_CLOSE', actorType: user.isSystem ? 'SYSTEM' : 'ADMIN', actorId: user._id,
         internalReason: payload.reason || '支付超时', requestId,
         createdAt: timestamp, updatedAt: timestamp, version: 1,
         isTest: currentOrder.isTest === true
@@ -451,12 +488,90 @@ function createPaymentHandler({
     };
   }
 
+  async function runMaintenance({ requestId }) {
+    const timestamp = now();
+    const result = await db.collection('payment_records')
+      .where({ status: 'PREPAY' })
+      .orderBy('expiresAt', 'asc')
+      .limit(20)
+      .get();
+    const expired = result.data.filter((record) => {
+      const expiresAt = dateValue(record.expiresAt);
+      return Number.isFinite(expiresAt.getTime()) && expiresAt <= timestamp;
+    });
+    const summary = {
+      checkedCount: expired.length,
+      closedCount: 0,
+      confirmedPaidCount: 0,
+      pendingCount: 0
+    };
+    const user = maintenanceActor();
+    for (const payment of expired) {
+      const closed = await closePayment({
+        user,
+        payload: { orderId: payment.orderId, reason: '支付超时定时关单' },
+        requestId
+      });
+      if (!closed.success) {
+        summary.pendingCount += 1;
+      } else if (closed.data.order.paymentStatus === 'CLOSED') {
+        summary.closedCount += 1;
+      } else if (closed.data.order.paymentStatus === 'PAID') {
+        summary.confirmedPaidCount += 1;
+      } else {
+        summary.pendingCount += 1;
+      }
+    }
+    summary.reconciliation = null;
+    if (chinaHour(timestamp) >= 10) {
+      const billDate = previousChinaDate(timestamp);
+      const existing = await first(db.collection('reconciliation_records'), { billDate });
+      if (existing) {
+        summary.reconciliation = { billDate, status: existing.status, skipped: true };
+      } else {
+        try {
+          const reconciled = await reconcileDaily({
+            user,
+            payload: { billDate },
+            requestId
+          });
+          if (reconciled.success) {
+            summary.reconciliation = {
+              billDate,
+              status: reconciled.data.reconciliation.status,
+              skipped: false
+            };
+          } else {
+            summary.reconciliation = {
+              billDate,
+              status: 'RETRY_PENDING',
+              skipped: false
+            };
+          }
+        } catch (error) {
+          logger.error('scheduled reconciliation failed', {
+            billDate,
+            code: error && error.code ? error.code : 'UNKNOWN'
+          });
+          summary.reconciliation = {
+            billDate,
+            status: 'RETRY_PENDING',
+            skipped: false
+          };
+        }
+      }
+    }
+    return { success: true, data: { maintenance: summary }, requestId };
+  }
+
   async function requestRefund({ user, event, payload, requestId }) {
     if (!hasPermission(user, 'refund.request') || !hasPermission(user, 'refund.execute')) {
       return failure('FORBIDDEN', '无权发起退款', requestId);
     }
-    const idempotencyKey = event.idempotencyKey;
-    if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim() || idempotencyKey.length > 64) {
+    const idempotencyKey = typeof event.idempotencyKey === 'string'
+      ? event.idempotencyKey.trim()
+      : '';
+    if (!idempotencyKey || idempotencyKey.length > 64) {
       return failure('INVALID_ARGUMENT', '退款必须提供有效的幂等键', requestId);
     }
     const reason = typeof payload.reason === 'string' ? payload.reason.trim() : '';
@@ -518,10 +633,13 @@ function createPaymentHandler({
       }
       const addResult = await refunds.add({ data: {
         orderId: order._id, orderNo: order.orderNo,
-        refundNo: outRefundNo, outRefundNo, refundId: null,
+        refundNo: outRefundNo,
+        outRefundNo,
+        refundId: pendingUniqueId('REFUND', outRefundNo),
         amountCents: payload.amountCents, reason, status: 'CREATING',
         requestedBy: user._id, approvedBy: user._id,
-        notifyId: null, refundedAt: null,
+        notifyId: pendingUniqueId('REFUND_NOTIFY', outRefundNo),
+        refundedAt: null,
         idempotencyKey, requestHash, requestId,
         createdAt: timestamp, updatedAt: timestamp, version: 1,
         isTest: order.isTest === true
@@ -600,7 +718,7 @@ function createPaymentHandler({
       };
     }
     await db.collection('refund_records').doc(refundId).update({ data: {
-      refundId: response.refund_id || null,
+      refundId: response.refund_id || pendingUniqueId('REFUND', outRefundNo),
       status: response.status || 'PROCESSING',
       updatedAt: now(),
       version: 2
@@ -808,6 +926,12 @@ function createPaymentHandler({
   return async function main(event = {}) {
     const requestId = event.requestId || '';
     try {
+      if (event.action === 'maintenance.run' && !hasWechatTimerSource(cloud)) {
+        return failure('FORBIDDEN', '定时维护仅允许云函数定时触发器调用', requestId);
+      }
+      if (event.action === 'maintenance.run') {
+        return await runMaintenance({ requestId });
+      }
       if (event.action === 'prepay.create') {
         const user = await currentCustomer(db, cloud);
         if (!user) return failure('UNAUTHENTICATED', '请先完成微信登录', requestId);
@@ -1064,11 +1188,12 @@ function createPaymentNotificationHandler({
 
 function validateRefundResult({ resource, refund, payment, order }) {
   if (!payment) throw new Error('退款关联的支付记录不存在');
+  const knownRefundId = publicExternalId(refund.refundId);
   if (
     resource.out_trade_no !== payment.outTradeNo ||
     resource.transaction_id !== payment.transactionId ||
     resource.out_refund_no !== refund.outRefundNo ||
-    (refund.refundId && resource.refund_id !== refund.refundId) ||
+    (knownRefundId && resource.refund_id !== knownRefundId) ||
     !resource.amount ||
     resource.amount.refund !== refund.amountCents ||
     resource.amount.total !== payment.amountCents ||

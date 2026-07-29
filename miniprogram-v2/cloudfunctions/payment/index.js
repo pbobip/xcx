@@ -29,13 +29,24 @@ function rawBody(event) {
     : event.body;
 }
 
-exports.main = async function main(event = {}) {
+function isTimerInvocation() {
+  const context = cloud.getWXContext ? cloud.getWXContext() : {};
+  return String(context.SOURCE || '').split(',').includes('wx_trigger');
+}
+
+exports.main = async function main(event = {}, context = {}) {
   const path = requestPath(event);
   if (path.endsWith('/payment/notify')) {
     return paymentNotificationMain({ headers: event.headers || {}, rawBody: rawBody(event) });
   }
   if (path.endsWith('/refund/notify')) {
     return refundNotificationMain({ headers: event.headers || {}, rawBody: rawBody(event) });
+  }
+  if (isTimerInvocation()) {
+    return paymentMain({
+      action: 'maintenance.run',
+      requestId: context.requestId || event.TriggerName || ''
+    });
   }
   return paymentMain(event);
 };
